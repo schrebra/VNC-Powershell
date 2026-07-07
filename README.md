@@ -2,6 +2,9 @@
 
 A 100% pure PowerShell and C# implementation of a VNC Client (Viewer) and VNC Server. Utilizing WPF for the user interface and native Windows APIs for screen capture and input injection, this suite requires no third-party executables, DLLs, or installation packages.
 
+<img width="60%" alt="image" src="https://github.com/user-attachments/assets/da07c390-7f2e-43b0-acdf-1aa834ed14c9" />
+
+
 ---
 
 ## What is it?
