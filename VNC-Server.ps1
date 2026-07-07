@@ -16,6 +16,9 @@
       - DPI-aware multi-monitor capture (SystemInformation.VirtualScreen)
       - Automatic Windows Firewall rule creation (falls back to registry check for non-admins)
       - Graceful handling of locked/sleeping screens (sends black frame instead of crashing)
+      - Live, single-line console HUD showing active client stats (IP, Port, Duration)
+      - Native mouse cursor rendering
+      - Diagnostic logging for screen capture failures (anti-spam: logs once per failure state)
       - Configurable via parameters / environment variables
 
 .NOTES
@@ -97,33 +100,27 @@ if (-not $AllowLocalhostOnly) {
     $fwRuleName = "PowerShell VNC Server (TCP $Port)"
     $ruleExists = $false
     
-    # First, try standard method (works if admin)
     try {
         $existingRule = Get-NetFirewallRule -DisplayName $fwRuleName -ErrorAction Stop
         if ($existingRule) {
             $ruleExists = $true
             Write-Host "[preflight] Firewall rule '$fwRuleName' already exists." -ForegroundColor Green
         }
-    } catch {
-        # If Get-NetFirewallRule fails, we proceed to try creating or checking registry
-    }
+    } catch { }
 
     if (-not $ruleExists) {
-        # Try to create it (requires Admin)
         try {
             Write-Host "[preflight] Adding inbound firewall rule: '$fwRuleName'..." -ForegroundColor Yellow
             New-NetFirewallRule -DisplayName $fwRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -ErrorAction Stop | Out-Null
             Write-Host "[preflight] Firewall rule added successfully." -ForegroundColor Green
             $ruleExists = $true
         } catch {
-            # If creation fails (e.g. non-admin), look in the registry for all profiles
             Write-Host "[preflight] Not running as Admin. Checking registry for existing inbound TCP $Port rule..." -ForegroundColor Yellow
             $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules"
             try {
                 $regRules = Get-ItemProperty -Path $regPath -ErrorAction Stop
                 foreach ($prop in $regRules.PSObject.Properties) {
                     $val = $prop.Value
-                    # Windows Firewall registry values are pipe-delimited strings (v2.x format)
                     if ($val -match "Dir=In\|" -and $val -match "Action=Allow\|") {
                         $protoOk = ($val -match "Protocol=6\|") -or ($val -match "Protocol=Any\|") -or ($val -notmatch "Protocol=")
                         $portOk  = ($val -match "LPort=$Port\|") -or ($val -match "LPort=$Port,") -or ($val -match "LPort=Any\|") -or ($val -notmatch "LPort=")
@@ -142,13 +139,11 @@ if (-not $AllowLocalhostOnly) {
                 }
             } catch {
                 Write-Warning "[preflight] Could not read firewall rules from registry. Access denied or key missing."
-                Write-Warning "             Manually run as Admin: New-NetFirewallRule -DisplayName '$fwRuleName' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port"
             }
         }
     }
 }
 
-# Ensure log directory exists
  $logDir = Split-Path $LogPath -Parent
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 
@@ -171,7 +166,12 @@ using System.Windows.Forms;
 
 namespace PwshVnc
 {
-    // ───────────────────────── Config ─────────────────────────
+    public struct ClientInfo
+    {
+        public string Endpoint;
+        public DateTime ConnectedAt;
+    }
+
     public sealed class VncConfig
     {
         public int Port = 5900;
@@ -187,7 +187,6 @@ namespace PwshVnc
         public string DesktopName = "PowerShell VNC";
     }
 
-    // ───────────────────────── Logger (rotating, thread-safe) ─────────────────────────
     public sealed class Logger : IDisposable
     {
         private readonly string _path;
@@ -268,13 +267,36 @@ namespace PwshVnc
         }
     }
 
-    // ───────────────────────── DPI-aware screen capture ─────────────────────────
     public sealed class ScreenCapturer
     {
         [DllImport("user32.dll")] private static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
         private const int DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
         private static bool _dpiSet;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int X; public int Y; }
+        
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CURSORINFO
+        {
+            public int cbSize;
+            public int flags;
+            public IntPtr hCursor;
+            public POINT ptScreenPos;
+        }
+        
+        [DllImport("user32.dll")]
+        private static extern bool GetCursorInfo(ref CURSORINFO pci);
+        
+        [DllImport("user32.dll")]
+        private static extern bool DrawIconEx(IntPtr hdc, int xLeft, int yTop, IntPtr hIcon, int cxWidth, int cyHeight, int istepIfAniCur, IntPtr hbrFlickerFreeDraw, int diFlags);
+        
+        private const int CURSOR_SHOWING = 0x00000001;
+        private const int DI_NORMAL = 0x0003;
+
+        public static Logger Log { get; set; }
+        private static bool _captureErrorLogged = false;
 
         public static void EnsureDpiAware()
         {
@@ -293,7 +315,7 @@ namespace PwshVnc
             EnsureDpiAware();
             Rectangle bounds = SystemInformation.VirtualScreen;
             if (bounds.Width <= 0 || bounds.Height <= 0)
-                bounds = new Rectangle(0, 0, 1024, 768); // Fallback if no screen
+                bounds = new Rectangle(0, 0, 1024, 768);
 
             Bitmap bmp = null;
             BitmapData data = null;
@@ -303,21 +325,49 @@ namespace PwshVnc
                 using (Graphics g = Graphics.FromImage(bmp))
                 {
                     g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bmp.Size, CopyPixelOperation.SourceCopy);
+                    
+                    CURSORINFO pci;
+                    pci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+                    pci.flags = 0;
+                    pci.hCursor = IntPtr.Zero;
+                    pci.ptScreenPos = new POINT();
+                    
+                    if (GetCursorInfo(ref pci) && pci.flags == CURSOR_SHOWING && pci.hCursor != IntPtr.Zero)
+                    {
+                        IntPtr hdc = g.GetHdc();
+                        try
+                        {
+                            DrawIconEx(hdc, pci.ptScreenPos.X - bounds.X, pci.ptScreenPos.Y - bounds.Y, pci.hCursor, 0, 0, 0, IntPtr.Zero, DI_NORMAL);
+                        }
+                        finally
+                        {
+                            g.ReleaseHdc(hdc);
+                        }
+                    }
                 }
+                
                 data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
                 stride = data.Stride;
                 int byteCount = Math.Abs(data.Stride) * bmp.Height;
                 buffer = new byte[byteCount];
                 Marshal.Copy(data.Scan0, buffer, 0, byteCount);
+                
+                _captureErrorLogged = false; // Reset spam flag on success
                 return bounds;
             }
-            catch
+            catch (Exception ex)
             {
-                // Screen is locked, sleeping, or RDP disconnected.
-                // Return a black screen to keep the VNC connection alive without crashing.
+                // Anti-spam: Only log the exception once per failure state to prevent 
+                // 30 errors per second from filling the log file if the screen is unavailable.
+                if (!_captureErrorLogged)
+                {
+                    if (Log != null) Log.Error("Screen capture failed (returning black frame). Is there an active user session?", ex);
+                    _captureErrorLogged = true;
+                }
+                
                 stride = bounds.Width * 4;
                 int byteCount = stride * bounds.Height;
-                buffer = new byte[byteCount]; // Default is all zeros (black)
+                buffer = new byte[byteCount];
                 return bounds;
             }
             finally
@@ -328,16 +378,12 @@ namespace PwshVnc
         }
     }
 
-    // ───────────────────────── VNC password auth ─────────────────────────
     internal static class VncAuth
     {
         public static byte[] BuildChallenge()
         {
             byte[] c = new byte[16];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(c);
-            }
+            using (var rng = RandomNumberGenerator.Create()) { rng.GetBytes(c); }
             return c;
         }
 
@@ -372,7 +418,6 @@ namespace PwshVnc
         }
     }
 
-    // ───────────────────────── Keysym → VK mapping ─────────────────────────
     internal static class KeysymMap
     {
         public static byte VkFromKeysym(uint k)
@@ -427,7 +472,6 @@ namespace PwshVnc
         }
     }
 
-    // ───────────────────────── Input injector ─────────────────────────
     internal static class Input
     {
         [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
@@ -446,7 +490,6 @@ namespace PwshVnc
         public static void KeyUp(byte vk) { keybd_event(vk, 0, KEYUP, 0); }
     }
 
-    // ───────────────────────── Per-client handler ─────────────────────────
     internal sealed class VncClientHandler
     {
         private readonly TcpClient _client;
@@ -457,10 +500,16 @@ namespace PwshVnc
         private int _prevStride;
         private int _prevW, _prevH;
 
+        public string Endpoint { get; private set; }
+        public DateTime ConnectedAt { get; private set; }
         public TcpClient Client { get { return _client; } }
 
-        public VncClientHandler(TcpClient c, VncConfig cfg, Logger log, VncServer server)
-        { _client = c; _cfg = cfg; _log = log; _server = server; }
+        public VncClientHandler(TcpClient c, VncConfig cfg, Logger log, VncServer server, string endpoint)
+        { 
+            _client = c; _cfg = cfg; _log = log; _server = server; 
+            Endpoint = endpoint;
+            ConnectedAt = DateTime.UtcNow;
+        }
 
         public void Run()
         {
@@ -469,7 +518,7 @@ namespace PwshVnc
             try
             {
                 c.NoDelay = true;
-                c.ReceiveTimeout = 5000; // 5s timeout for idle loop polling
+                c.ReceiveTimeout = 5000;
                 c.SendTimeout = _cfg.SendTimeoutMs;
                 SetKeepAlive(c, 15000, 5000, 3);
 
@@ -479,14 +528,9 @@ namespace PwshVnc
                 ReadExact(s, 12);
 
                 bool authEnabled = !string.IsNullOrEmpty(_cfg.Password);
-                if (authEnabled)
-                {
-                    s.WriteByte(1); s.WriteByte(2);
-                }
-                else
-                {
-                    s.WriteByte(1); s.WriteByte(1);
-                }
+                if (authEnabled) { s.WriteByte(1); s.WriteByte(2); }
+                else { s.WriteByte(1); s.WriteByte(1); }
+                
                 int chosen = s.ReadByte();
                 if (chosen == -1) { _log.Warn("Client closed during security select."); return; }
 
@@ -546,7 +590,7 @@ namespace PwshVnc
                         var sockEx = ioEx.InnerException as SocketException;
                         if (sockEx != null && sockEx.SocketErrorCode == SocketError.TimedOut)
                         {
-                            continue; // Idle timeout, loop again
+                            continue;
                         }
                         _log.Warn("Client I/O error: " + ioEx.Message);
                         break;
@@ -831,7 +875,6 @@ namespace PwshVnc
         }
     }
 
-    // ───────────────────────── Server ─────────────────────────
     public sealed class VncServer : IDisposable
     {
         private readonly VncConfig _cfg;
@@ -866,10 +909,7 @@ namespace PwshVnc
             
             lock (_clientsLock)
             {
-                foreach (var sock in _clientSockets)
-                {
-                    try { sock.Close(); } catch { }
-                }
+                foreach (var sock in _clientSockets) { try { sock.Close(); } catch { } }
                 _clientSockets.Clear();
                 _clients.Clear();
             }
@@ -903,10 +943,7 @@ namespace PwshVnc
                 while (_running)
                 {
                     TcpClient c = null;
-                    try
-                    {
-                        c = _listener.AcceptTcpClient();
-                    }
+                    try { c = _listener.AcceptTcpClient(); }
                     catch (SocketException sex)
                     {
                         if (!_running) break;
@@ -937,7 +974,9 @@ namespace PwshVnc
                         continue;
                     }
 
-                    var handler = new VncClientHandler(c, _cfg, _log, this);
+                    string endpointStr = ep != null ? ep.ToString() : "Unknown";
+                    var handler = new VncClientHandler(c, _cfg, _log, this, endpointStr);
+                    
                     lock (_clientsLock)
                     {
                         _clients.Add(handler);
@@ -977,6 +1016,19 @@ namespace PwshVnc
             get { lock (_clientsLock) { return _clients.Count; } }
         }
 
+        public ClientInfo[] GetActiveClients()
+        {
+            lock (_clientsLock)
+            {
+                ClientInfo[] arr = new ClientInfo[_clients.Count];
+                for (int i = 0; i < _clients.Count; i++)
+                {
+                    arr[i] = new ClientInfo { Endpoint = _clients[i].Endpoint, ConnectedAt = _clients[i].ConnectedAt };
+                }
+                return arr;
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
@@ -985,7 +1037,6 @@ namespace PwshVnc
         }
     }
 
-    // ───────────────────────── Console control handler ─────────────────────────
     public static class ConsoleCtrl
     {
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -997,14 +1048,19 @@ namespace PwshVnc
             CTRL_LOGOFF = 5, CTRL_SHUTDOWN = 6
         }
 
-        private static HandlerRoutine _handler; // Prevent GC of delegate
+        private static HandlerRoutine _handler;
 
         public static void Register(Action onShutdown)
         {
             _handler = (t) =>
             {
+                if (t == CtrlType.CTRL_C || t == CtrlType.CTRL_BREAK)
+                {
+                    return false; 
+                }
+                
                 try { onShutdown(); } catch { }
-                return false;
+                return true;
             };
             SetConsoleCtrlHandler(_handler, true);
         }
@@ -1050,6 +1106,7 @@ if (-not ('PwshVnc.VncServer' -as [type])) {
 }
 
  $logger  = New-Object PwshVnc.Logger -ArgumentList $config.LogFilePath, $config.LogMaxBytes, $config.LogArchiveCount
+[PwshVnc.ScreenCapturer]::Log = $logger # Inject logger so capture failures are recorded
  $server  = New-Object PwshVnc.VncServer -ArgumentList $config, $logger
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1080,22 +1137,56 @@ Write-Host "Press Ctrl+C to stop. The server will shut down cleanly." -Foregroun
 Write-Host ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. RUN + HEALTH MONITOR
+# 6. RUN + LIVE CONSOLE STATS MONITOR (Dynamic Single-Line HUD)
 # ─────────────────────────────────────────────────────────────────────────────
 try {
     $lastStatus = [datetime]::UtcNow
     while ($true) {
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 1
+        $now = [datetime]::UtcNow
+        $activeClients = $server.GetActiveClients()
+        
+        if ($activeClients.Count -eq 0) {
+            $statusStr = "Waiting for connections..."
+        } else {
+            $parts = @()
+            foreach ($client in $activeClients) {
+                $duration = $now - $client.ConnectedAt
+                $parts += "$($client.Endpoint) ($($duration.ToString('hh\:mm\:ss')))"
+            }
+            $statusStr = $parts -join " | "
+        }
+        
+        $line = "[stats] $(Get-Date -Format 'HH:mm:ss') | Active: $($activeClients.Count) | $statusStr"
+        
+        $maxLen = 120
+        try {
+            $w = $Host.UI.RawUI.WindowSize.Width
+            if ($w -gt 0) { $maxLen = $w }
+        } catch {}
+        
+        if ($line.Length -gt $maxLen) { 
+            $line = $line.Substring(0, $maxLen - 3) + "..." 
+        } else { 
+            $line = $line.PadRight($maxLen)
+        }
+        
+        try {
+            Write-Host "`r$line" -NoNewline -ForegroundColor Cyan
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+
         if (([datetime]::UtcNow - $lastStatus).TotalMinutes -ge 5) {
             $lastStatus = [datetime]::UtcNow
             $logger.Info("Health: active clients = $($server.ActiveClientCount), running = $($server.IsRunning)")
-            Write-Host "[health] $(Get-Date -Format 'HH:mm:ss')  active=$($server.ActiveClientCount)" -ForegroundColor DarkGray
         }
     }
 } finally {
+    try { Write-Host "" } catch {}
     Write-Host "`n[shutdown] Stopping server..." -ForegroundColor Yellow
     try { $server.Stop() }  catch { }
     try { $logger.Info('Shutdown via Ctrl+C / finally block.') } catch {}
-    try { $logger.Dispose() } catch { }
+    try { $logger.Dispose() } catch {}
     Write-Host "[shutdown] Done." -ForegroundColor Red
 }
