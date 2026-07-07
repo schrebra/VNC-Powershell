@@ -15,6 +15,7 @@
       - Console-control handler for clean shutdown on logoff/shutdown
       - DPI-aware multi-monitor capture (SystemInformation.VirtualScreen)
       - Automatic Windows Firewall rule creation (falls back to registry check for non-admins)
+      - Graceful handling of locked/sleeping screens (sends black frame instead of crashing)
       - Configurable via parameters / environment variables
 
 .NOTES
@@ -291,6 +292,9 @@ namespace PwshVnc
         {
             EnsureDpiAware();
             Rectangle bounds = SystemInformation.VirtualScreen;
+            if (bounds.Width <= 0 || bounds.Height <= 0)
+                bounds = new Rectangle(0, 0, 1024, 768); // Fallback if no screen
+
             Bitmap bmp = null;
             BitmapData data = null;
             try
@@ -305,6 +309,15 @@ namespace PwshVnc
                 int byteCount = Math.Abs(data.Stride) * bmp.Height;
                 buffer = new byte[byteCount];
                 Marshal.Copy(data.Scan0, buffer, 0, byteCount);
+                return bounds;
+            }
+            catch
+            {
+                // Screen is locked, sleeping, or RDP disconnected.
+                // Return a black screen to keep the VNC connection alive without crashing.
+                stride = bounds.Width * 4;
+                int byteCount = stride * bounds.Height;
+                buffer = new byte[byteCount]; // Default is all zeros (black)
                 return bounds;
             }
             finally
