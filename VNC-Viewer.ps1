@@ -1,3 +1,4 @@
+
 <#
 .SYNOPSIS
     Interactive VNC Client GUI - PowerShell 5.1 / WPF / XAML
@@ -12,14 +13,19 @@
     Removed Ctrl+Alt+Del, Refresh, and Win buttons.
     Removed rename and name additions entirely.
     Dropdowns for hosts/passwords limited to a configurable amount (default 5).
+    Dark themed scrollbars applied globally (incl. left panel sessions) - made thicker.
+    Pinned/Recent sessions show condensed single-line host (no port line).
+    Password/Host history dropdown arrow has hover highlight color but text is black.
+    Hostnames/IPs strictly validated (no spaces, no full text pages allowed).
+    Input boxes and dropdowns matched perfectly to 32px height.
 #>
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
-$DefaultHost        = "10.80.10.187"
+$DefaultHost        = ""
 $DefaultPort        = "5900"
-$DefaultPassword    = "Admin1!Ad"
+$DefaultPassword    = ""
 $SessionHistoryFile = [System.IO.Path]::Combine($env:APPDATA, "VncClient_Sessions.json")
 $SettingsFile       = [System.IO.Path]::Combine($env:APPDATA, "VncClient_Settings.json")
 $ConfigIniFile      = [System.IO.Path]::Combine($env:APPDATA, "VncClient_Config.ini")
@@ -98,7 +104,7 @@ public class VncEngine : IDisposable
             Stopwatch pt=Stopwatch.StartNew();
             _tcp=new TcpClient();_tcp.ReceiveBufferSize=8*1024*1024;_tcp.NoDelay=true;
             Task ct=_tcp.ConnectAsync(host,port);
-            if(!ct.Wait(8000)){try{_tcp.Close();}catch{};_lastError="Connection timed out – host unreachable after 8 seconds";return false;}
+            if(!ct.Wait(8000)){try{_tcp.Close();}catch{};_lastError="Connection timed out - host unreachable after 8 seconds";return false;}
             if(ct.IsFaulted){Exception bx=ct.Exception!=null?ct.Exception.GetBaseException():null;try{_tcp.Close();}catch{};_lastError=bx!=null?bx.Message:"Connection failed";return false;}
             _stream=_tcp.GetStream();_stream.ReadTimeout=30000;_stream.WriteTimeout=10000;_lastPingMs=pt.ElapsedMilliseconds;
             ReadExact(12);_stream.Write(Encoding.ASCII.GetBytes("RFB 003.008\n"),0,12);
@@ -172,8 +178,8 @@ public static class KeysymMap
 }
 '@
 
-try{[VncEngine]|Out-Null}catch{Add-Type -TypeDefinition $VncEngineCode -ReferencedAssemblies @("System.dll") -Language CSharp}
-try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -ReferencedAssemblies @("PresentationCore","WindowsBase") -Language CSharp}
+try { [VncEngine] | Out-Null } catch { Add-Type -TypeDefinition $VncEngineCode -ReferencedAssemblies @("System.dll") -Language CSharp }
+try { [KeysymMap] | Out-Null } catch { Add-Type -TypeDefinition $KeysymMapCode -ReferencedAssemblies @("PresentationCore","WindowsBase") -Language CSharp }
 
 # ============================================================
 # XAML - Catppuccin Macchiato theme, GridSplitter for left panel
@@ -205,6 +211,7 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
       <Setter Property="BorderBrush" Value="#494d64"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Padding" Value="4,3"/>
+      <Setter Property="Height" Value="32"/>
       <Setter Property="FontSize" Value="13"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
     </Style>
@@ -214,8 +221,29 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
       <Setter Property="VerticalAlignment" Value="Center"/>
       <Setter Property="Padding" Value="4,0"/>
     </Style>
-
-    <!-- Side Panel Button Styles -->
+    <Style x:Key="HistBtn" TargetType="Button">
+      <Setter Property="Background" Value="#1e2030"/>
+      <Setter Property="Foreground" Value="#b8c0e0"/>
+      <Setter Property="BorderBrush" Value="#494d64"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Background" Value="#c6a0f6"/>
+          <Setter Property="Foreground" Value="Black"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
     <Style x:Key="PanelBtnStyle" TargetType="Button">
       <Setter Property="OverridesDefaultStyle" Value="True"/>
       <Setter Property="Background" Value="Transparent"/>
@@ -243,8 +271,6 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
     <Style x:Key="PanelBtnStyleCurrent" TargetType="Button" BasedOn="{StaticResource PanelBtnStyle}">
       <Setter Property="Background" Value="#363a4f"/>
     </Style>
-
-    <!-- Dark Mode ComboBox Styles -->
     <Style x:Key="DarkComboBox" TargetType="ComboBox">
       <Setter Property="Background" Value="#1e2030"/>
       <Setter Property="Foreground" Value="#cad3f5"/>
@@ -306,8 +332,99 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
         </Setter.Value>
       </Setter>
     </Style>
-
-    <!-- DropDown Styles -->
+    <Style TargetType="ScrollBar">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#494d64"/>
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Vertical">
+          <Setter Property="Width" Value="14"/>
+          <Setter Property="MinWidth" Value="14"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ScrollBar">
+                <Grid Background="#1e2030">
+                  <Border Background="#1e2030" CornerRadius="7" Margin="0"/>
+                  <Track Name="PART_Track" IsDirectionReversed="True">
+                    <Track.DecreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
+                    </Track.DecreaseRepeatButton>
+                    <Track.Thumb>
+                      <Thumb Focusable="False">
+                        <Thumb.Style>
+                          <Style TargetType="Thumb">
+                            <Setter Property="Background" Value="#494d64"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Setter Property="Template">
+                              <Setter.Value>
+                                <ControlTemplate TargetType="Thumb">
+                                  <Border Background="{TemplateBinding Background}" CornerRadius="7" Margin="2"/>
+                                </ControlTemplate>
+                              </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#c6a0f6"/></Trigger>
+                              <Trigger Property="IsDragging" Value="True"><Setter Property="Background" Value="#c6a0f6"/></Trigger>
+                            </Style.Triggers>
+                          </Style>
+                        </Thumb.Style>
+                      </Thumb>
+                    </Track.Thumb>
+                    <Track.IncreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0" Focusable="False"/>
+                    </Track.IncreaseRepeatButton>
+                  </Track>
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Trigger>
+        <Trigger Property="Orientation" Value="Horizontal">
+          <Setter Property="Height" Value="14"/>
+          <Setter Property="MinHeight" Value="14"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ScrollBar">
+                <Grid Background="#1e2030">
+                  <Border Background="#1e2030" CornerRadius="7" Margin="0"/>
+                  <Track Name="PART_Track" IsDirectionReversed="False">
+                    <Track.DecreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/>
+                    </Track.DecreaseRepeatButton>
+                    <Track.Thumb>
+                      <Thumb Focusable="False">
+                        <Thumb.Style>
+                          <Style TargetType="Thumb">
+                            <Setter Property="Background" Value="#494d64"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Setter Property="Template">
+                              <Setter.Value>
+                                <ControlTemplate TargetType="Thumb">
+                                  <Border Background="{TemplateBinding Background}" CornerRadius="7" Margin="2"/>
+                                </ControlTemplate>
+                              </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#c6a0f6"/></Trigger>
+                              <Trigger Property="IsDragging" Value="True"><Setter Property="Background" Value="#c6a0f6"/></Trigger>
+                            </Style.Triggers>
+                          </Style>
+                        </Thumb.Style>
+                      </Thumb>
+                    </Track.Thumb>
+                    <Track.IncreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/>
+                    </Track.IncreaseRepeatButton>
+                  </Track>
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
     <Style x:Key="DropDownMenu" TargetType="ContextMenu">
       <Setter Property="Background" Value="#1e2030"/>
       <Setter Property="BorderBrush" Value="#494d64"/>
@@ -360,8 +477,6 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
         </Setter.Value>
       </Setter>
     </Style>
-
-    <!-- ContextMenu Dark Theme for Side Panel -->
     <Style TargetType="ContextMenu">
       <Setter Property="Background" Value="#1e2030"/>
       <Setter Property="BorderBrush" Value="#494d64"/>
@@ -424,17 +539,17 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
           <Border Width="1" Background="#363a4f" Margin="4,2"/>
           <Label Content="Host:" Style="{StaticResource Lbl}"/>
           <TextBox x:Name="txtHost" Width="120" Style="{StaticResource InputBox}" Text="$DefaultHost"/>
-          <Button x:Name="btnHostHistory" Content="&#x25BC;" Style="{StaticResource ToolBtn}" Padding="6,4" FontSize="10" ToolTip="Recent hosts"/>
+          <Button x:Name="btnHostHistory" Content="&#x25BC;" Style="{StaticResource HistBtn}" Padding="6,4" Width="26" ToolTip="Recent hosts"/>
           <Button x:Name="btnPasteHost" Content="&#x1F4CB;" Style="{StaticResource ToolBtn}" Padding="6,4" FontSize="12" ToolTip="Paste host from clipboard"/>
           <Label Content="Port:" Style="{StaticResource Lbl}"/>
           <TextBox x:Name="txtPort" Width="50" Style="{StaticResource InputBox}" Text="$DefaultPort"/>
           <Label Content="Password:" Style="{StaticResource Lbl}"/>
           <Grid Width="160">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <PasswordBox x:Name="txtPassword" Grid.Column="0" Background="#1e2030" Foreground="#cad3f5" BorderBrush="#494d64" BorderThickness="1,1,0,1" Padding="4,3" FontSize="13" VerticalContentAlignment="Center"/>
-            <TextBox x:Name="txtPasswordVisible" Grid.Column="0" Visibility="Collapsed" Background="#1e2030" Foreground="#cad3f5" BorderBrush="#494d64" BorderThickness="1,1,0,1" Padding="4,3" FontSize="13" VerticalContentAlignment="Center"/>
-            <Button x:Name="btnTogglePw" Grid.Column="1" Width="26" Background="#1e2030" Foreground="#b8c0e0" BorderBrush="#494d64" BorderThickness="1" FontSize="16" Cursor="Hand" VerticalAlignment="Stretch" ToolTip="Show/Hide password" Padding="0">&#x1F441;</Button>
-            <Button x:Name="btnPwHistory" Grid.Column="2" Width="22" Background="#1e2030" Foreground="#b8c0e0" BorderBrush="#494d64" BorderThickness="1" FontSize="10" Cursor="Hand" VerticalAlignment="Stretch" ToolTip="Recent passwords" Padding="0">&#x25BC;</Button>
+            <PasswordBox x:Name="txtPassword" Grid.Column="0" Background="#1e2030" Foreground="#cad3f5" BorderBrush="#494d64" BorderThickness="1,1,0,1" Padding="4,3" FontSize="13" Height="32" VerticalContentAlignment="Center"/>
+            <TextBox x:Name="txtPasswordVisible" Grid.Column="0" Visibility="Collapsed" Background="#1e2030" Foreground="#cad3f5" BorderBrush="#494d64" BorderThickness="1,1,0,1" Padding="4,3" FontSize="13" Height="32" VerticalContentAlignment="Center"/>
+            <Button x:Name="btnTogglePw" Grid.Column="1" Width="26" Background="#1e2030" Foreground="#b8c0e0" BorderBrush="#494d64" BorderThickness="1" FontSize="16" Cursor="Hand" Height="32" VerticalAlignment="Stretch" ToolTip="Show/Hide password" Padding="0">&#x1F441;</Button>
+            <Button x:Name="btnPwHistory" Grid.Column="2" Content="&#x25BC;" Style="{StaticResource HistBtn}" Width="22" ToolTip="Recent passwords"/>
           </Grid>
           <Button x:Name="btnConnect" Content="Connect" Style="{StaticResource ToolBtn}" Margin="8,2,2,2"/>
           <Button x:Name="btnDisconnect" Content="Disconnect" Style="{StaticResource ToolBtn}" Visibility="Collapsed"/>
@@ -534,492 +649,653 @@ try{[KeysymMap]|Out-Null}catch{Add-Type -TypeDefinition $KeysymMapCode -Referenc
 $reader = New-Object System.Xml.XmlNodeReader $Xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-# Disable ContextMenu open animation (instant open)
-$window.Resources[[System.Windows.SystemParameters]::MenuPopupAnimationKey] = [System.Windows.Controls.Primitives.PopupAnimation]::None
+function Get-E($n) { $window.FindName($n) }
 
-# Element lookup helper
-function Get-E($n){ $window.FindName($n) }
-$txtHost=Get-E txtHost; $txtPort=Get-E txtPort
-$txtPassword=Get-E txtPassword; $txtPasswordVisible=Get-E txtPasswordVisible
-$btnTogglePw=Get-E btnTogglePw; $btnConnect=Get-E btnConnect; $btnDisconnect=Get-E btnDisconnect
-$btnFitWindow=Get-E btnFitWindow; $btnFullScreen=Get-E btnFullScreen; $btnClipboard=Get-E btnClipboard
-$btnSettings=Get-E btnSettings; $btnTogglePanel=Get-E btnTogglePanel; $btnClearHistory=Get-E btnClearHistory
-$btnPasteHost=Get-E btnPasteHost; $btnHostHistory=Get-E btnHostHistory; $btnPwHistory=Get-E btnPwHistory
-$txtStatus=Get-E txtStatus; $txtResolution=Get-E txtResolution
-$txtFps=Get-E txtFps; $txtFrames=Get-E txtFrames; $txtData=Get-E txtData; $txtLatency=Get-E txtLatency; $txtUptime=Get-E txtUptime
-$statusDot=Get-E statusDot; $scrollViewer=Get-E scrollViewer; $vncCanvas=Get-E vncCanvas; $vncImage=Get-E vncImage
-$sidePanel=Get-E sidePanel; $sidePanelCol=Get-E sidePanelCol; $panelSplitter=Get-E panelSplitter
-$pinnedSessionsList=Get-E pinnedSessionsList; $activeSessionsList=Get-E activeSessionsList; $recentSessionsList=Get-E recentSessionsList
-$noConnectionOverlay=Get-E noConnectionOverlay; $toolbarBorder=Get-E toolbarBorder; $statsBorder=Get-E statsBorder
-$fullscreenBar=Get-E fullscreenBar; $fsHoverZone=Get-E fsHoverZone; $fsSessionName=Get-E fsSessionName
-$btnFsWindowed=Get-E btnFsWindowed; $btnFsDisconnect=Get-E btnFsDisconnect; $btnFsClipboard=Get-E btnFsClipboard
-$sep1=Get-E sep1; $sep2=Get-E sep2
+$txtHost             = Get-E txtHost
+$txtPort             = Get-E txtPort
+$txtPassword         = Get-E txtPassword
+$txtPasswordVisible  = Get-E txtPasswordVisible
+$btnTogglePw         = Get-E btnTogglePw
+$btnConnect          = Get-E btnConnect
+$btnDisconnect       = Get-E btnDisconnect
+$btnFitWindow        = Get-E btnFitWindow
+$btnFullScreen       = Get-E btnFullScreen
+$btnClipboard        = Get-E btnClipboard
+$btnSettings         = Get-E btnSettings
+$btnTogglePanel      = Get-E btnTogglePanel
+$btnClearHistory     = Get-E btnClearHistory
+$btnPasteHost        = Get-E btnPasteHost
+$btnHostHistory      = Get-E btnHostHistory
+$btnPwHistory        = Get-E btnPwHistory
+$txtStatus           = Get-E txtStatus
+$txtResolution       = Get-E txtResolution
+$txtFps              = Get-E txtFps
+$txtFrames           = Get-E txtFrames
+$txtData             = Get-E txtData
+$txtLatency          = Get-E txtLatency
+$txtUptime           = Get-E txtUptime
+$statusDot           = Get-E statusDot
+$scrollViewer        = Get-E scrollViewer
+$vncCanvas           = Get-E vncCanvas
+$vncImage            = Get-E vncImage
+$sidePanel           = Get-E sidePanel
+$sidePanelCol        = Get-E sidePanelCol
+$panelSplitter       = Get-E panelSplitter
+$pinnedSessionsList  = Get-E pinnedSessionsList
+$activeSessionsList  = Get-E activeSessionsList
+$recentSessionsList  = Get-E recentSessionsList
+$noConnectionOverlay = Get-E noConnectionOverlay
+$toolbarBorder       = Get-E toolbarBorder
+$statsBorder         = Get-E statsBorder
+$fullscreenBar       = Get-E fullscreenBar
+$fsHoverZone         = Get-E fsHoverZone
+$fsSessionName       = Get-E fsSessionName
+$btnFsWindowed       = Get-E btnFsWindowed
+$btnFsDisconnect     = Get-E btnFsDisconnect
+$btnFsClipboard      = Get-E btnFsClipboard
+$sep1                = Get-E sep1
+$sep2                = Get-E sep2
 
-$txtPassword.Password = $DefaultPassword
-$txtPasswordVisible.Text = $DefaultPassword
+$txtPassword.Password       = $DefaultPassword
+$txtPasswordVisible.Text    = $DefaultPassword
 
 # ============================================================
 # STATE
 # ============================================================
-$script:vncEngine=$null; $script:updateTimer=$null; $script:statsTimer=$null; $script:clipTimer=$null
-$script:lastFrameVer=-1; $script:buttonMask=0; $script:fitMode=$false
-$script:writeableBmp=$null; $script:panelOpen=$true
-$script:activeSessions=@{}; $script:activeSessionKey=$null
-$script:recentSessions=[System.Collections.ArrayList]::new()
-$script:isFullScreen=$false; $script:savedWindowState=$null; $script:savedWindowStyle=$null
-$script:savedWindowRect=$null; $script:savedResizeMode=[System.Windows.ResizeMode]::CanResize
-$script:fsBarVisible=$false; $script:fsBarTimer=$null
-$script:lastLocalClipboard=""; $script:syncingPw=$false; $script:pwVisible=$false
-$script:vncSettings=@{ SharedConnection=$true; ViewOnly=$false; RefreshRate=33; ClipboardSync=$true; DropDownCount=5 }
-$script:pendingConnect=$null; $script:pendingConnectKey=$null; $script:pendingConnectHost=$null
-$script:pendingConnectPort=0; $script:pendingConnectPw=$null
-$script:connectAsyncHandle=$null; $script:connectBgPS=$null; $script:connectRunspace=$null
-$script:connectPollTimer=$null; $script:connectCancelled=$false
-$script:panelWidth=250
-$script:windowWidth=1100
-$script:windowHeight=720
-$script:showPassword=$false
-$script:recentHosts=[System.Collections.ArrayList]::new()
-$script:recentPasswords=[System.Collections.ArrayList]::new()
+$script:vncEngine           = $null
+$script:updateTimer         = $null
+$script:statsTimer          = $null
+$script:clipTimer           = $null
+$script:lastFrameVer        = -1
+$script:buttonMask          = 0
+$script:fitMode             = $false
+$script:writeableBmp        = $null
+$script:panelOpen           = $true
+$script:activeSessions      = @{}
+$script:activeSessionKey    = $null
+$script:recentSessions      = [System.Collections.ArrayList]::new()
+$script:isFullScreen        = $false
+$script:savedWindowState    = $null
+$script:savedWindowStyle    = $null
+$script:savedWindowRect     = $null
+$script:savedResizeMode     = [System.Windows.ResizeMode]::CanResize
+$script:fsBarVisible        = $false
+$script:fsBarTimer          = $null
+$script:lastLocalClipboard  = ""
+$script:syncingPw           = $false
+$script:pwVisible           = $false
+$script:vncSettings         = @{ SharedConnection=$true; ViewOnly=$false; RefreshRate=33; ClipboardSync=$true; DropDownCount=5 }
+$script:pendingConnect      = $null
+$script:pendingConnectKey   = $null
+$script:pendingConnectHost  = $null
+$script:pendingConnectPort  = 0
+$script:pendingConnectPw    = $null
+$script:connectAsyncHandle  = $null
+$script:connectBgPS         = $null
+$script:connectRunspace     = $null
+$script:connectPollTimer    = $null
+$script:connectCancelled    = $false
+$script:panelWidth          = 250
+$script:windowWidth         = 1100
+$script:windowHeight        = 720
+$script:showPassword        = $false
+$script:recentHosts         = [System.Collections.ArrayList]::new()
+$script:recentPasswords     = [System.Collections.ArrayList]::new()
 
 # ============================================================
-# HELPERS - Brush + Dialog button factories
+# HELPERS
 # ============================================================
-function B([byte]$r,[byte]$g,[byte]$b){ New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.Color]::FromRgb($r,$g,$b)) }
-function Make-DlgBtn([string]$text,[bool]$primary){
-    $b=New-Object System.Windows.Controls.Button; $b.Content=$text
-    $b.Height=32
-    $b.Padding=[System.Windows.Thickness]::new(12,0,12,0); $b.FontSize=13
-    $b.Cursor=[System.Windows.Input.Cursors]::Hand
-    if($primary){ $b.Background=(B 0xC6 0xA0 0xF6); $b.Foreground=[System.Windows.Media.Brushes]::Black; $b.BorderThickness=[System.Windows.Thickness]::new(0) }
-    else{ $b.Background=(B 0x49 0x4D 0x64); $b.Foreground=[System.Windows.Media.Brushes]::Black; $b.BorderBrush=(B 0x49 0x4D 0x64) }
+function B([byte]$r, [byte]$g, [byte]$b) {
+    New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.Color]::FromRgb($r, $g, $b))
+}
+
+function Get-Password {
+    if ($script:pwVisible) { $txtPasswordVisible.Text } else { $txtPassword.Password }
+}
+
+function Make-DlgBtn([string]$text, [bool]$primary) {
+    $b = New-Object System.Windows.Controls.Button
+    $b.Content           = $text
+    $b.Height            = 32
+    $b.Padding           = [System.Windows.Thickness]::new(12, 0, 12, 0)
+    $b.FontSize          = 13
+    $b.Cursor            = [System.Windows.Input.Cursors]::Hand
+    if ($primary) {
+        $b.Background    = B 0xC6 0xA0 0xF6
+        $b.Foreground    = [System.Windows.Media.Brushes]::Black
+        $b.BorderThickness = [System.Windows.Thickness]::new(0)
+    } else {
+        $b.Background    = B 0x49 0x4D 0x64
+        $b.Foreground    = [System.Windows.Media.Brushes]::Black
+        $b.BorderBrush   = B 0x49 0x4D 0x64
+    }
     return $b
 }
-function Show-ConfirmDialog([string]$title, [string]$message){
-    $dlg=New-Object System.Windows.Window
-    $dlg.Title=""; $dlg.Width=400
-    $dlg.SizeToContent=[System.Windows.SizeToContent]::Height
-    $dlg.WindowStyle=[System.Windows.WindowStyle]::None
-    $dlg.ResizeMode=[System.Windows.ResizeMode]::NoResize
-    $dlg.WindowStartupLocation=[System.Windows.WindowStartupLocation]::CenterOwner
-    $dlg.Owner=$window; $dlg.Background=(B 0x1E 0x20 0x30)
-    $dlg.BorderBrush=(B 0x49 0x4D 0x64); $dlg.BorderThickness=New-Object System.Windows.Thickness(1)
 
-    $mainDock=New-Object System.Windows.Controls.DockPanel
-    
-    # Custom Title Bar
-    $titleBar=New-Object System.Windows.Controls.Border
-    $titleBar.Background=(B 0x24 0x27 0x3A)
-    $titleBar.Padding=New-Object System.Windows.Thickness(10,8,10,8)
-    [System.Windows.Controls.DockPanel]::SetDock($titleBar,[System.Windows.Controls.Dock]::Top)
-    $titleText=New-Object System.Windows.Controls.TextBlock
-    $titleText.Text=$title; $titleText.Foreground=(B 0xCA 0xD3 0xF5)
-    $titleText.FontSize=14; $titleText.FontWeight=[System.Windows.FontWeights]::SemiBold
-    $titleBar.Child=$titleText
+# Shared dark dialog shell: returns ($dlg, $mainDock, $contentDock)
+# $contentDock is a DockPanel between the title bar and button panel for body content
+function New-DarkDialog([string]$title, [int]$width = 400) {
+    $dlg = New-Object System.Windows.Window
+    $dlg.Title                     = ""
+    $dlg.Width                     = $width
+    $dlg.SizeToContent             = [System.Windows.SizeToContent]::Height
+    $dlg.WindowStyle               = [System.Windows.WindowStyle]::None
+    $dlg.ResizeMode                = [System.Windows.ResizeMode]::NoResize
+    $dlg.WindowStartupLocation     = [System.Windows.WindowStartupLocation]::CenterOwner
+    $dlg.Owner                     = $window
+    $dlg.Background                = B 0x1E 0x20 0x30
+    $dlg.BorderBrush               = B 0x49 0x4D 0x64
+    $dlg.BorderThickness           = [System.Windows.Thickness]::new(1)
+
+    $mainDock = New-Object System.Windows.Controls.DockPanel
+
+    $titleBar = New-Object System.Windows.Controls.Border
+    $titleBar.Background  = B 0x24 0x27 0x3A
+    $titleBar.Padding     = [System.Windows.Thickness]::new(10, 8, 10, 8)
+    [System.Windows.Controls.DockPanel]::SetDock($titleBar, [System.Windows.Controls.Dock]::Top)
+    $titleText            = New-Object System.Windows.Controls.TextBlock
+    $titleText.Text       = $title
+    $titleText.Foreground = B 0xCA 0xD3 0xF5
+    $titleText.FontSize   = 14
+    $titleText.FontWeight = [System.Windows.FontWeights]::SemiBold
+    $titleBar.Child       = $titleText
     $titleBar.Add_MouseLeftButtonDown({ $dlg.DragMove() })
-    $mainDock.Children.Add($titleBar)|Out-Null
+    $mainDock.Children.Add($titleBar) | Out-Null
 
-    $bp=New-Object System.Windows.Controls.StackPanel; $bp.Orientation=[System.Windows.Controls.Orientation]::Horizontal; $bp.HorizontalAlignment=[System.Windows.HorizontalAlignment]::Right
-    $bp.Margin=[System.Windows.Thickness]::new(15,0,15,15)
-    [System.Windows.Controls.DockPanel]::SetDock($bp,[System.Windows.Controls.Dock]::Bottom)
-    $yes=Make-DlgBtn "Yes" $true; $yes.Width=70; $yes.Margin=[System.Windows.Thickness]::new(0,0,8,0)
-    $no=Make-DlgBtn "No" $false; $no.Width=70
-    $yes.Add_Click({$dlg.Tag=$true;$dlg.Close()}); $no.Add_Click({$dlg.Tag=$false;$dlg.Close()})
-    $bp.Children.Add($yes)|Out-Null; $bp.Children.Add($no)|Out-Null
-    $mainDock.Children.Add($bp)|Out-Null
+    $dlg.Content = $mainDock
+    return $dlg, $mainDock
+}
 
-    $tbMsg=New-Object System.Windows.Controls.TextBlock; $tbMsg.Text=$message
-    $tbMsg.Foreground=(B 0xCA 0xD3 0xF5); $tbMsg.FontSize=13; $tbMsg.TextWrapping=[System.Windows.TextWrapping]::Wrap
-    $tbMsg.Margin=[System.Windows.Thickness]::new(15,15,15,12)
-    $mainDock.Children.Add($tbMsg)|Out-Null
-    
-    $dlg.Content=$mainDock; $dlg.ShowDialog()|Out-Null
+function Show-ConfirmDialog([string]$title, [string]$message) {
+    $dlg, $mainDock = New-DarkDialog $title
+
+    $bp = New-Object System.Windows.Controls.StackPanel
+    $bp.Orientation        = [System.Windows.Controls.Orientation]::Horizontal
+    $bp.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $bp.Margin             = [System.Windows.Thickness]::new(15, 0, 15, 15)
+    [System.Windows.Controls.DockPanel]::SetDock($bp, [System.Windows.Controls.Dock]::Bottom)
+
+    $yes = Make-DlgBtn "Yes" $true;  $yes.Width = 70; $yes.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+    $no  = Make-DlgBtn "No"  $false; $no.Width  = 70
+    $yes.Add_Click({ $dlg.Tag = $true;  $dlg.Close() })
+    $no.Add_Click({  $dlg.Tag = $false; $dlg.Close() })
+    $bp.Children.Add($yes) | Out-Null
+    $bp.Children.Add($no)  | Out-Null
+    $mainDock.Children.Add($bp) | Out-Null
+
+    $tbMsg = New-Object System.Windows.Controls.TextBlock
+    $tbMsg.Text        = $message
+    $tbMsg.Foreground  = B 0xCA 0xD3 0xF5
+    $tbMsg.FontSize    = 13
+    $tbMsg.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    $tbMsg.Margin      = [System.Windows.Thickness]::new(15, 15, 15, 12)
+    $mainDock.Children.Add($tbMsg) | Out-Null
+
+    $dlg.ShowDialog() | Out-Null
     return [bool]$dlg.Tag
 }
-function Show-DarkMessageDialog([string]$title, [string]$message){
-    $dlg=New-Object System.Windows.Window
-    $dlg.Title=""; $dlg.Width=400
-    $dlg.SizeToContent=[System.Windows.SizeToContent]::Height
-    $dlg.WindowStyle=[System.Windows.WindowStyle]::None
-    $dlg.ResizeMode=[System.Windows.ResizeMode]::NoResize
-    $dlg.WindowStartupLocation=[System.Windows.WindowStartupLocation]::CenterOwner
-    $dlg.Owner=$window; $dlg.Background=(B 0x1E 0x20 0x30)
-    $dlg.BorderBrush=(B 0x49 0x4D 0x64); $dlg.BorderThickness=New-Object System.Windows.Thickness(1)
 
-    $mainDock=New-Object System.Windows.Controls.DockPanel
-    
-    # Custom Title Bar
-    $titleBar=New-Object System.Windows.Controls.Border
-    $titleBar.Background=(B 0x24 0x27 0x3A)
-    $titleBar.Padding=New-Object System.Windows.Thickness(10,8,10,8)
-    [System.Windows.Controls.DockPanel]::SetDock($titleBar,[System.Windows.Controls.Dock]::Top)
-    $titleText=New-Object System.Windows.Controls.TextBlock
-    $titleText.Text=$title; $titleText.Foreground=(B 0xCA 0xD3 0xF5)
-    $titleText.FontSize=14; $titleText.FontWeight=[System.Windows.FontWeights]::SemiBold
-    $titleBar.Child=$titleText
-    $titleBar.Add_MouseLeftButtonDown({ $dlg.DragMove() })
-    $mainDock.Children.Add($titleBar)|Out-Null
+function Show-DarkMessageDialog([string]$title, [string]$message) {
+    $dlg, $mainDock = New-DarkDialog $title
 
-    $bp=New-Object System.Windows.Controls.StackPanel; $bp.Orientation=[System.Windows.Controls.Orientation]::Horizontal; $bp.HorizontalAlignment=[System.Windows.HorizontalAlignment]::Right
-    $bp.Margin=[System.Windows.Thickness]::new(15,0,15,15)
-    [System.Windows.Controls.DockPanel]::SetDock($bp,[System.Windows.Controls.Dock]::Bottom)
-    $ok=Make-DlgBtn "OK" $true; $ok.Width=70
-    $ok.Add_Click({$dlg.Close()})
-    $bp.Children.Add($ok)|Out-Null
-    $mainDock.Children.Add($bp)|Out-Null
+    $bp = New-Object System.Windows.Controls.StackPanel
+    $bp.Orientation        = [System.Windows.Controls.Orientation]::Horizontal
+    $bp.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $bp.Margin             = [System.Windows.Thickness]::new(15, 0, 15, 15)
+    [System.Windows.Controls.DockPanel]::SetDock($bp, [System.Windows.Controls.Dock]::Bottom)
 
-    $tbMsg=New-Object System.Windows.Controls.TextBlock; $tbMsg.Text=$message
-    $tbMsg.Foreground=(B 0xCA 0xD3 0xF5); $tbMsg.FontSize=13; $tbMsg.TextWrapping=[System.Windows.TextWrapping]::Wrap
-    $tbMsg.Margin=[System.Windows.Thickness]::new(15,15,15,12)
-    $mainDock.Children.Add($tbMsg)|Out-Null
-    
-    $dlg.Content=$mainDock; $dlg.ShowDialog()|Out-Null
+    $ok = Make-DlgBtn "OK" $true; $ok.Width = 70
+    $ok.Add_Click({ $dlg.Close() })
+    $bp.Children.Add($ok) | Out-Null
+    $mainDock.Children.Add($bp) | Out-Null
+
+    $tbMsg = New-Object System.Windows.Controls.TextBlock
+    $tbMsg.Text        = $message
+    $tbMsg.Foreground  = B 0xCA 0xD3 0xF5
+    $tbMsg.FontSize    = 13
+    $tbMsg.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    $tbMsg.Margin      = [System.Windows.Thickness]::new(15, 15, 15, 12)
+    $mainDock.Children.Add($tbMsg) | Out-Null
+
+    $dlg.ShowDialog() | Out-Null
 }
 
 # ============================================================
-# CONFIG INI (panel size, window size, password visibility, recent hosts/passwords)
+# CONFIG INI
 # ============================================================
-function Load-ConfigIni{
-    if(Test-Path $ConfigIniFile){
-        try{
-            $lines = Get-Content $ConfigIniFile
-            foreach($ln in $lines){
-                if($ln -match '^\s*PanelWidth\s*=\s*(\d+)'){
-                    $w=[int]$Matches[1]
-                    if($w -ge 160 -and $w -le 600){ $script:panelWidth=$w }
-                }
-                if($ln -match '^\s*WindowWidth\s*=\s*(\d+)'){
-                    $w=[int]$Matches[1]
-                    if($w -ge 700){ $script:windowWidth=$w }
-                }
-                if($ln -match '^\s*WindowHeight\s*=\s*(\d+)'){
-                    $h=[int]$Matches[1]
-                    if($h -ge 500){ $script:windowHeight=$h }
-                }
-                if($ln -match '^\s*ShowPassword\s*=\s*(\d+)'){
-                    $script:showPassword=[int]$Matches[1] -eq 1
-                }
-            }
-            $hc=0
-            foreach($ln in $lines){ if($ln -match '^\s*RecentHostCount\s*=\s*(\d+)'){ $hc=[int]$Matches[1]; break } }
-            for($i=0;$i -lt $hc;$i++){
-                $pattern="^\s*RecentHost$i\s*=\s*(.*)$"
-                foreach($ln in $lines){ if($ln -match $pattern){ $script:recentHosts.Add($Matches[1])|Out-Null; break } }
-            }
-            $pc=0
-            foreach($ln in $lines){ if($ln -match '^\s*RecentPasswordCount\s*=\s*(\d+)'){ $pc=[int]$Matches[1]; break } }
-            for($i=0;$i -lt $pc;$i++){
-                $pattern="^\s*RecentPassword$i\s*=\s*(.*)$"
-                foreach($ln in $lines){ if($ln -match $pattern){ $script:recentPasswords.Add($Matches[1])|Out-Null; break } }
-            }
-        }catch{}
-    }
-}
-function Save-ConfigIni{
-    try{
-        $sb=New-Object System.Text.StringBuilder
-        $sb.AppendLine("[VncClient]")|Out-Null
-        $sb.AppendLine("PanelWidth=$($script:panelWidth)")|Out-Null
-        $sb.AppendLine("WindowWidth=$($script:windowWidth)")|Out-Null
-        $sb.AppendLine("WindowHeight=$($script:windowHeight)")|Out-Null
-        $sb.AppendLine("ShowPassword=$(if($script:showPassword){'1'}else{'0'})")|Out-Null
-        $sb.AppendLine("RecentHostCount=$($script:recentHosts.Count)")|Out-Null
-        for($i=0;$i -lt $script:recentHosts.Count;$i++){ $sb.AppendLine("RecentHost$i=$($script:recentHosts[$i])")|Out-Null }
-        $sb.AppendLine("RecentPasswordCount=$($script:recentPasswords.Count)")|Out-Null
-        for($i=0;$i -lt $script:recentPasswords.Count;$i++){ $sb.AppendLine("RecentPassword$i=$($script:recentPasswords[$i])")|Out-Null }
-        [System.IO.File]::WriteAllText($ConfigIniFile,$sb.ToString())
-    }catch{}
-}
-
-# ============================================================
-# RECENT HOSTS / PASSWORDS MANAGEMENT
-# ============================================================
-function Add-ToRecentHosts([string]$h){
-    if(-not $h){return}
-    $idx=-1
-    for($i=0;$i -lt $script:recentHosts.Count;$i++){ if($script:recentHosts[$i] -eq $h){$idx=$i;break} }
-    if($idx -ge 0){ $script:recentHosts.RemoveAt($idx) }
-    $script:recentHosts.Insert(0,$h)
-    while($script:recentHosts.Count -gt $script:vncSettings.DropDownCount){ $script:recentHosts.RemoveAt($script:recentHosts.Count-1) }
-}
-function Add-ToRecentPasswords([string]$pw){
-    if(-not $pw){return}
-    $idx=-1
-    for($i=0;$i -lt $script:recentPasswords.Count;$i++){ if($script:recentPasswords[$i] -eq $pw){$idx=$i;break} }
-    if($idx -ge 0){ $script:recentPasswords.RemoveAt($idx) }
-    $script:recentPasswords.Insert(0,$pw)
-    while($script:recentPasswords.Count -gt $script:vncSettings.DropDownCount){ $script:recentPasswords.RemoveAt($script:recentPasswords.Count-1) }
-}
-function Show-HostHistoryDropdown{
-    $ctx=New-Object System.Windows.Controls.ContextMenu
-    $ctx.Style=$window.FindResource("DropDownMenu")
-    if($script:recentHosts.Count -eq 0){
-        $mi=New-Object System.Windows.Controls.MenuItem; $mi.Header="No recent hosts"; $mi.IsEnabled=$false
-        $mi.Style=$window.FindResource("DropDownItem")
-        $ctx.Items.Add($mi)|Out-Null
-    } else {
-        foreach($hh in $script:recentHosts){
-            $mi=New-Object System.Windows.Controls.MenuItem; $mi.Header=$hh; $captured=$hh
-            $mi.Style=$window.FindResource("DropDownItem")
-            $mi.Add_Click({ $txtHost.Text=$captured }.GetNewClosure()); $ctx.Items.Add($mi)|Out-Null
+function Load-ConfigIni {
+    if (-not (Test-Path $ConfigIniFile)) { return }
+    try {
+        $lines = Get-Content $ConfigIniFile
+        foreach ($ln in $lines) {
+            if ($ln -match '^\s*PanelWidth\s*=\s*(\d+)')        { $w = [int]$Matches[1]; if ($w -ge 160 -and $w -le 600) { $script:panelWidth  = $w } }
+            if ($ln -match '^\s*WindowWidth\s*=\s*(\d+)')       { $w = [int]$Matches[1]; if ($w -ge 700)                 { $script:windowWidth = $w } }
+            if ($ln -match '^\s*WindowHeight\s*=\s*(\d+)')      { $h = [int]$Matches[1]; if ($h -ge 500)                 { $script:windowHeight= $h } }
+            if ($ln -match '^\s*ShowPassword\s*=\s*(\d+)')      { $script:showPassword = [int]$Matches[1] -eq 1 }
         }
-        $sep=New-Object System.Windows.Controls.Separator
-        $sep.Style=$window.FindResource("DropDownSeparator")
-        $ctx.Items.Add($sep)|Out-Null
-        $clr=New-Object System.Windows.Controls.MenuItem; $clr.Header="Clear Recent"
-        $clr.Style=$window.FindResource("DropDownItem")
-        $clr.Add_Click({
-            $res = Show-ConfirmDialog "Clear Recent" "Are you sure you want to clear all recent hosts?"
-            if($res){ $script:recentHosts.Clear(); Save-ConfigIni }
-        })
-        $ctx.Items.Add($clr)|Out-Null
-    }
-    $btnHostHistory.ContextMenu=$ctx
-    $ctx.PlacementTarget=$txtHost
-    $ctx.Placement=[System.Windows.Controls.Primitives.PlacementMode]::Bottom
-    $ctx.IsOpen=$true
+        $hc = 0
+        foreach ($ln in $lines) { if ($ln -match '^\s*RecentHostCount\s*=\s*(\d+)') { $hc = [int]$Matches[1]; break } }
+        for ($i = 0; $i -lt $hc; $i++) {
+            $pattern = "^\s*RecentHost$i\s*=\s*(.*)$"
+            foreach ($ln in $lines) { if ($ln -match $pattern) { $script:recentHosts.Add($Matches[1]) | Out-Null; break } }
+        }
+        $pc = 0
+        foreach ($ln in $lines) { if ($ln -match '^\s*RecentPasswordCount\s*=\s*(\d+)') { $pc = [int]$Matches[1]; break } }
+        for ($i = 0; $i -lt $pc; $i++) {
+            $pattern = "^\s*RecentPassword$i\s*=\s*(.*)$"
+            foreach ($ln in $lines) { if ($ln -match $pattern) { $script:recentPasswords.Add($Matches[1]) | Out-Null; break } }
+        }
+    } catch {}
 }
-function Show-PwHistoryDropdown{
-    $ctx=New-Object System.Windows.Controls.ContextMenu
-    $ctx.Style=$window.FindResource("DropDownMenu")
-    if($script:recentPasswords.Count -eq 0){
-        $mi=New-Object System.Windows.Controls.MenuItem; $mi.Header="No recent passwords"; $mi.IsEnabled=$false
-        $mi.Style=$window.FindResource("DropDownItem")
-        $ctx.Items.Add($mi)|Out-Null
+
+function Save-ConfigIni {
+    try {
+        $sb = New-Object System.Text.StringBuilder
+        $sb.AppendLine("[VncClient]")                                                          | Out-Null
+        $sb.AppendLine("PanelWidth=$($script:panelWidth)")                                     | Out-Null
+        $sb.AppendLine("WindowWidth=$($script:windowWidth)")                                   | Out-Null
+        $sb.AppendLine("WindowHeight=$($script:windowHeight)")                                 | Out-Null
+        $sb.AppendLine("ShowPassword=$(if($script:showPassword){'1'}else{'0'})")               | Out-Null
+        $sb.AppendLine("RecentHostCount=$($script:recentHosts.Count)")                         | Out-Null
+        for ($i = 0; $i -lt $script:recentHosts.Count; $i++) {
+            $sb.AppendLine("RecentHost$i=$($script:recentHosts[$i])")                          | Out-Null
+        }
+        $sb.AppendLine("RecentPasswordCount=$($script:recentPasswords.Count)")                 | Out-Null
+        for ($i = 0; $i -lt $script:recentPasswords.Count; $i++) {
+            $sb.AppendLine("RecentPassword$i=$($script:recentPasswords[$i])")                  | Out-Null
+        }
+        [System.IO.File]::WriteAllText($ConfigIniFile, $sb.ToString())
+    } catch {}
+}
+
+# ============================================================
+# RECENT HOSTS / PASSWORDS
+# ============================================================
+function Add-ToRecentHosts([string]$h) {
+    if (-not $h) { return }
+    $idx = -1
+    for ($i = 0; $i -lt $script:recentHosts.Count; $i++) { if ($script:recentHosts[$i] -eq $h) { $idx = $i; break } }
+    if ($idx -ge 0) { $script:recentHosts.RemoveAt($idx) }
+    $script:recentHosts.Insert(0, $h)
+    while ($script:recentHosts.Count -gt $script:vncSettings.DropDownCount) { $script:recentHosts.RemoveAt($script:recentHosts.Count - 1) }
+}
+
+function Add-ToRecentPasswords([string]$pw) {
+    if (-not $pw) { return }
+    $idx = -1
+    for ($i = 0; $i -lt $script:recentPasswords.Count; $i++) { if ($script:recentPasswords[$i] -eq $pw) { $idx = $i; break } }
+    if ($idx -ge 0) { $script:recentPasswords.RemoveAt($idx) }
+    $script:recentPasswords.Insert(0, $pw)
+    while ($script:recentPasswords.Count -gt $script:vncSettings.DropDownCount) { $script:recentPasswords.RemoveAt($script:recentPasswords.Count - 1) }
+}
+
+function New-HistoryContextMenu([string]$emptyText, [System.Collections.ArrayList]$items, [scriptblock]$onSelect, [scriptblock]$onClear, [string]$clearTitle, [string]$clearConfirmMsg) {
+    $ctx = New-Object System.Windows.Controls.ContextMenu
+    $ctx.Style = $window.FindResource("DropDownMenu")
+    if ($items.Count -eq 0) {
+        $mi = New-Object System.Windows.Controls.MenuItem
+        $mi.Header    = $emptyText
+        $mi.IsEnabled = $false
+        $mi.Style     = $window.FindResource("DropDownItem")
+        $ctx.Items.Add($mi) | Out-Null
     } else {
-        foreach($pp in $script:recentPasswords){
-            $mi=New-Object System.Windows.Controls.MenuItem; $mi.Header=$pp; $captured=$pp
-            $mi.Style=$window.FindResource("DropDownItem")
+        foreach ($entry in $items) {
+            $mi = New-Object System.Windows.Controls.MenuItem
+            $mi.Header = $entry
+            $mi.Style  = $window.FindResource("DropDownItem")
+            $captured  = $entry
+            $mi.Add_Click($onSelect.GetNewClosure())
+            # Rebind captured inside closure
+            $mi.Tag = $captured
+            $mi.Add_Click({ & $onSelect $this.Tag }.GetNewClosure())
+            $ctx.Items.Add($mi) | Out-Null
+        }
+        $sep = New-Object System.Windows.Controls.Separator
+        $sep.Style = $window.FindResource("DropDownSeparator")
+        $ctx.Items.Add($sep) | Out-Null
+        $clr = New-Object System.Windows.Controls.MenuItem
+        $clr.Header = "Clear Recent"
+        $clr.Style  = $window.FindResource("DropDownItem")
+        $clr.Add_Click({
+            if (Show-ConfirmDialog $clearTitle $clearConfirmMsg) { & $onClear }
+        }.GetNewClosure())
+        $ctx.Items.Add($clr) | Out-Null
+    }
+    return $ctx
+}
+
+function Show-HostHistoryDropdown {
+    $ctx = New-Object System.Windows.Controls.ContextMenu
+    $ctx.Style = $window.FindResource("DropDownMenu")
+    if ($script:recentHosts.Count -eq 0) {
+        $mi = New-Object System.Windows.Controls.MenuItem
+        $mi.Header    = "No recent hosts"
+        $mi.IsEnabled = $false
+        $mi.Style     = $window.FindResource("DropDownItem")
+        $ctx.Items.Add($mi) | Out-Null
+    } else {
+        foreach ($hh in $script:recentHosts) {
+            $mi = New-Object System.Windows.Controls.MenuItem
+            $mi.Header = $hh
+            $mi.Style  = $window.FindResource("DropDownItem")
+            $captured  = $hh
+            $mi.Add_Click({ $txtHost.Text = $captured }.GetNewClosure())
+            $ctx.Items.Add($mi) | Out-Null
+        }
+        $sep = New-Object System.Windows.Controls.Separator
+        $sep.Style = $window.FindResource("DropDownSeparator")
+        $ctx.Items.Add($sep) | Out-Null
+        $clr = New-Object System.Windows.Controls.MenuItem
+        $clr.Header = "Clear Recent"
+        $clr.Style  = $window.FindResource("DropDownItem")
+        $clr.Add_Click({
+            if (Show-ConfirmDialog "Clear Recent" "Are you sure you want to clear all recent hosts?") {
+                $script:recentHosts.Clear(); Save-ConfigIni
+            }
+        })
+        $ctx.Items.Add($clr) | Out-Null
+    }
+    $btnHostHistory.ContextMenu    = $ctx
+    $ctx.PlacementTarget           = $txtHost
+    $ctx.Placement                 = [System.Windows.Controls.Primitives.PlacementMode]::Bottom
+    $ctx.IsOpen                    = $true
+}
+
+function Show-PwHistoryDropdown {
+    $ctx = New-Object System.Windows.Controls.ContextMenu
+    $ctx.Style = $window.FindResource("DropDownMenu")
+    if ($script:recentPasswords.Count -eq 0) {
+        $mi = New-Object System.Windows.Controls.MenuItem
+        $mi.Header    = "No recent passwords"
+        $mi.IsEnabled = $false
+        $mi.Style     = $window.FindResource("DropDownItem")
+        $ctx.Items.Add($mi) | Out-Null
+    } else {
+        foreach ($pp in $script:recentPasswords) {
+            $mi = New-Object System.Windows.Controls.MenuItem
+            $mi.Header = $pp
+            $mi.Style  = $window.FindResource("DropDownItem")
+            $captured  = $pp
             $mi.Add_Click({
-                $script:syncingPw=$true
-                $txtPassword.Password=$captured
-                $txtPasswordVisible.Text=$captured
-                $script:syncingPw=$false
-            }.GetNewClosure()); $ctx.Items.Add($mi)|Out-Null
+                $script:syncingPw = $true
+                $txtPassword.Password    = $captured
+                $txtPasswordVisible.Text = $captured
+                $script:syncingPw = $false
+            }.GetNewClosure())
+            $ctx.Items.Add($mi) | Out-Null
         }
-        $sep=New-Object System.Windows.Controls.Separator
-        $sep.Style=$window.FindResource("DropDownSeparator")
-        $ctx.Items.Add($sep)|Out-Null
-        $clr=New-Object System.Windows.Controls.MenuItem; $clr.Header="Clear Recent"
-        $clr.Style=$window.FindResource("DropDownItem")
+        $sep = New-Object System.Windows.Controls.Separator
+        $sep.Style = $window.FindResource("DropDownSeparator")
+        $ctx.Items.Add($sep) | Out-Null
+        $clr = New-Object System.Windows.Controls.MenuItem
+        $clr.Header = "Clear Recent"
+        $clr.Style  = $window.FindResource("DropDownItem")
         $clr.Add_Click({
-            $res = Show-ConfirmDialog "Clear Recent" "Are you sure you want to clear all recent passwords?"
-            if($res){ $script:recentPasswords.Clear(); Save-ConfigIni }
+            if (Show-ConfirmDialog "Clear Recent" "Are you sure you want to clear all recent passwords?") {
+                $script:recentPasswords.Clear(); Save-ConfigIni
+            }
         })
-        $ctx.Items.Add($clr)|Out-Null
+        $ctx.Items.Add($clr) | Out-Null
     }
-    $btnPwHistory.ContextMenu=$ctx
-    if($script:pwVisible){ $ctx.PlacementTarget=$txtPasswordVisible } else { $ctx.PlacementTarget=$txtPassword }
-    $ctx.Placement=[System.Windows.Controls.Primitives.PlacementMode]::Bottom
-    $ctx.IsOpen=$true
+    $btnPwHistory.ContextMenu = $ctx
+    $ctx.PlacementTarget      = if ($script:pwVisible) { $txtPasswordVisible } else { $txtPassword }
+    $ctx.Placement            = [System.Windows.Controls.Primitives.PlacementMode]::Bottom
+    $ctx.IsOpen               = $true
 }
 
 # ============================================================
 # SETTINGS (JSON)
 # ============================================================
-function Load-VncSettings{
-    if(-not(Test-Path $SettingsFile)){return}
-    try{
-        $j=Get-Content $SettingsFile -Raw|ConvertFrom-Json
-        if($null -ne $j.SharedConnection){$script:vncSettings.SharedConnection=[bool]$j.SharedConnection}
-        if($null -ne $j.ViewOnly){$script:vncSettings.ViewOnly=[bool]$j.ViewOnly}
-        if($null -ne $j.RefreshRate){$script:vncSettings.RefreshRate=[int]$j.RefreshRate}
-        if($null -ne $j.ClipboardSync){$script:vncSettings.ClipboardSync=[bool]$j.ClipboardSync}
-        if($null -ne $j.DropDownCount){$script:vncSettings.DropDownCount=[int]$j.DropDownCount}
-    }catch{}
+function Load-VncSettings {
+    if (-not (Test-Path $SettingsFile)) { return }
+    try {
+        $j = Get-Content $SettingsFile -Raw | ConvertFrom-Json
+        if ($null -ne $j.SharedConnection) { $script:vncSettings.SharedConnection = [bool]$j.SharedConnection }
+        if ($null -ne $j.ViewOnly)         { $script:vncSettings.ViewOnly         = [bool]$j.ViewOnly }
+        if ($null -ne $j.RefreshRate)      { $script:vncSettings.RefreshRate      = [int]$j.RefreshRate }
+        if ($null -ne $j.ClipboardSync)    { $script:vncSettings.ClipboardSync    = [bool]$j.ClipboardSync }
+        if ($null -ne $j.DropDownCount)    { $script:vncSettings.DropDownCount    = [int]$j.DropDownCount }
+    } catch {}
 }
-function Save-VncSettings{ try{ $script:vncSettings|ConvertTo-Json|Set-Content $SettingsFile -Force }catch{} }
+
+function Save-VncSettings {
+    try { $script:vncSettings | ConvertTo-Json | Set-Content $SettingsFile -Force } catch {}
+}
 
 # ============================================================
 # SESSION HISTORY
 # ============================================================
-function Load-SessionHistory{
-    if(-not(Test-Path $SessionHistoryFile)){return}
-    try{
-        $json=Get-Content $SessionHistoryFile -Raw|ConvertFrom-Json
+function Load-SessionHistory {
+    if (-not (Test-Path $SessionHistoryFile)) { return }
+    try {
+        $json = Get-Content $SessionHistoryFile -Raw | ConvertFrom-Json
         $script:recentSessions.Clear()
-        foreach($item in $json){
-            $script:recentSessions.Add(@{Host=$item.Host;Port=[int]$item.Port;Password=$item.Password;LastUsed=$item.LastUsed;Pinned=[bool]$item.Pinned})|Out-Null
+        foreach ($item in $json) {
+            $script:recentSessions.Add(@{
+                Host     = $item.Host
+                Port     = [int]$item.Port
+                Password = $item.Password
+                LastUsed = $item.LastUsed
+                Pinned   = [bool]$item.Pinned
+            }) | Out-Null
         }
-    }catch{}
+    } catch {}
 }
-function Save-SessionHistory{ try{ $script:recentSessions|ConvertTo-Json -Depth 3|Set-Content $SessionHistoryFile -Force }catch{} }
-function Add-ToHistory([string]$H,[int]$P,[string]$PW){
-    $key="${H}:${P}"; $idx=-1
-    for($i=0;$i -lt $script:recentSessions.Count;$i++){ if("$($script:recentSessions[$i].Host):$($script:recentSessions[$i].Port)" -eq $key){$idx=$i;break} }
-    if($idx -ge 0){
-        $ex=$script:recentSessions[$idx]; $script:recentSessions.RemoveAt($idx)
-        $ex.LastUsed=(Get-Date).ToString("yyyy-MM-dd HH:mm")
-        if($PW){$ex.Password=$PW}
-        $script:recentSessions.Insert(0,$ex)
-    } else {
-        $script:recentSessions.Insert(0,@{Host=$H;Port=$P;Password=$PW;LastUsed=(Get-Date).ToString("yyyy-MM-dd HH:mm");Pinned=$false})
+
+function Save-SessionHistory {
+    try { $script:recentSessions | ConvertTo-Json -Depth 3 | Set-Content $SessionHistoryFile -Force } catch {}
+}
+
+function Add-ToHistory([string]$H, [int]$P, [string]$PW) {
+    $key = "${H}:${P}"; $idx = -1
+    for ($i = 0; $i -lt $script:recentSessions.Count; $i++) {
+        if ("$($script:recentSessions[$i].Host):$($script:recentSessions[$i].Port)" -eq $key) { $idx = $i; break }
     }
-    while($script:recentSessions.Count -gt 30){$script:recentSessions.RemoveAt($script:recentSessions.Count-1)}
+    if ($idx -ge 0) {
+        $ex = $script:recentSessions[$idx]; $script:recentSessions.RemoveAt($idx)
+        $ex.LastUsed = (Get-Date).ToString("yyyy-MM-dd HH:mm")
+        if ($PW) { $ex.Password = $PW }
+        $script:recentSessions.Insert(0, $ex)
+    } else {
+        $script:recentSessions.Insert(0, @{ Host=$H; Port=$P; Password=$PW; LastUsed=(Get-Date).ToString("yyyy-MM-dd HH:mm"); Pinned=$false })
+    }
+    while ($script:recentSessions.Count -gt 30) { $script:recentSessions.RemoveAt($script:recentSessions.Count - 1) }
     Save-SessionHistory
 }
-function Get-SessionDisplayName($entry){
-    return "$($entry.Host):$($entry.Port)"
+
+function Get-SessionDisplayName($entry) { return "$($entry.Host):$($entry.Port)" }
+
+function Find-HistoryEntry([string]$Key) {
+    foreach ($s in $script:recentSessions) { if ("$($s.Host):$($s.Port)" -eq $Key) { return $s } }
+    return $null
 }
-function Find-HistoryEntry([string]$Key){ foreach($s in $script:recentSessions){ if("$($s.Host):$($s.Port)" -eq $Key){return $s} }; return $null }
-function Remove-HistoryEntry([string]$Key){
-    $idx=-1
-    for($i=0;$i -lt $script:recentSessions.Count;$i++){ if("$($script:recentSessions[$i].Host):$($script:recentSessions[$i].Port)" -eq $Key){$idx=$i;break} }
-    if($idx -ge 0){ $script:recentSessions.RemoveAt($idx); Save-SessionHistory; Update-SessionPanel }
+
+function Remove-HistoryEntry([string]$Key) {
+    $idx = -1
+    for ($i = 0; $i -lt $script:recentSessions.Count; $i++) {
+        if ("$($script:recentSessions[$i].Host):$($script:recentSessions[$i].Port)" -eq $Key) { $idx = $i; break }
+    }
+    if ($idx -ge 0) { $script:recentSessions.RemoveAt($idx); Save-SessionHistory; Update-SessionPanel }
 }
-function Toggle-Pin([string]$Key){ $e=Find-HistoryEntry $Key; if($null -ne $e){$e.Pinned=-not $e.Pinned; Save-SessionHistory; Update-SessionPanel} }
+
+function Toggle-Pin([string]$Key) {
+    $e = Find-HistoryEntry $Key
+    if ($null -ne $e) { $e.Pinned = -not $e.Pinned; Save-SessionHistory; Update-SessionPanel }
+}
 
 # ============================================================
 # CLIPBOARD DIALOG
 # ============================================================
-function Show-ClipboardDialog{
-    if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}
-    $dlg=New-Object System.Windows.Window
-    $dlg.Title="Clipboard Transfer"; $dlg.Width=500; $dlg.Height=400
-    $dlg.WindowStartupLocation=[System.Windows.WindowStartupLocation]::CenterOwner
-    $dlg.Owner=$window; $dlg.Background=(B 0x1E 0x20 0x30)
-    $dlg.ResizeMode=[System.Windows.ResizeMode]::CanResize; $dlg.MinWidth=400; $dlg.MinHeight=300
-    $mainSp=New-Object System.Windows.Controls.DockPanel; $mainSp.Margin=[System.Windows.Thickness]::new(15)
-    $titleTb=New-Object System.Windows.Controls.TextBlock; $titleTb.Text="Clipboard Transfer"
-    $titleTb.Foreground=[System.Windows.Media.Brushes]::White; $titleTb.FontSize=18; $titleTb.FontWeight=[System.Windows.FontWeights]::SemiBold
-    $titleTb.Margin=[System.Windows.Thickness]::new(0,0,0,4); [System.Windows.Controls.DockPanel]::SetDock($titleTb,"Top"); $mainSp.Children.Add($titleTb)|Out-Null
-    $helpTb=New-Object System.Windows.Controls.TextBlock
-    $helpTb.Text="Use 'Type to Remote' to emulate keystrokes and paste text into the remote session. 'Paste from PC Clipboard' retrieves your local clipboard into this box."
-    $helpTb.Foreground=(B 0x93 0x9A 0xB7); $helpTb.FontSize=12; $helpTb.TextWrapping=[System.Windows.TextWrapping]::Wrap
-    $helpTb.Margin=[System.Windows.Thickness]::new(0,0,0,10); [System.Windows.Controls.DockPanel]::SetDock($helpTb,"Top"); $mainSp.Children.Add($helpTb)|Out-Null
-    $btnPanel=New-Object System.Windows.Controls.StackPanel; $btnPanel.Orientation=[System.Windows.Controls.Orientation]::Horizontal
-    $btnPanel.HorizontalAlignment=[System.Windows.HorizontalAlignment]::Right; $btnPanel.Margin=[System.Windows.Thickness]::new(0,10,0,0)
-    [System.Windows.Controls.DockPanel]::SetDock($btnPanel,"Bottom")
-    $btnPaste=Make-DlgBtn "Paste from PC Clipboard" $false; $btnPaste.Margin=[System.Windows.Thickness]::new(0,0,6,0)
-    $btnSend=Make-DlgBtn "Type to Remote" $true; $btnSend.Margin=[System.Windows.Thickness]::new(0,0,6,0)
-    $btnClose=Make-DlgBtn "Close" $false
-    $btnPanel.Children.Add($btnPaste)|Out-Null; $btnPanel.Children.Add($btnSend)|Out-Null; $btnPanel.Children.Add($btnClose)|Out-Null
-    $mainSp.Children.Add($btnPanel)|Out-Null
-    $statusLbl=New-Object System.Windows.Controls.TextBlock; $statusLbl.Text=""; $statusLbl.FontSize=12
-    $statusLbl.Foreground=(B 0xCA 0xD3 0xF5); $statusLbl.Margin=[System.Windows.Thickness]::new(0,6,0,0)
-    [System.Windows.Controls.DockPanel]::SetDock($statusLbl,"Bottom"); $mainSp.Children.Add($statusLbl)|Out-Null
-    $clipTb=New-Object System.Windows.Controls.TextBox
-    $clipTb.AcceptsReturn=$true; $clipTb.AcceptsTab=$true; $clipTb.TextWrapping=[System.Windows.TextWrapping]::Wrap
-    $clipTb.VerticalScrollBarVisibility=[System.Windows.Controls.ScrollBarVisibility]::Auto
-    $clipTb.FontSize=14; $clipTb.FontFamily=(New-Object System.Windows.Media.FontFamily("Consolas"))
-    $clipTb.Background=(B 0x24 0x27 0x3A); $clipTb.Foreground=[System.Windows.Media.Brushes]::White; $clipTb.BorderBrush=(B 0x49 0x4D 0x64)
-    $clipTb.Padding=[System.Windows.Thickness]::new(8)
-    try{ if([System.Windows.Clipboard]::ContainsText()){ $clipTb.Text=[System.Windows.Clipboard]::GetText() } }catch{}
-    $mainSp.Children.Add($clipTb)|Out-Null
+function Show-ClipboardDialog {
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+
+    $dlg = New-Object System.Windows.Window
+    $dlg.Title                 = "Clipboard Transfer"
+    $dlg.Width                 = 500
+    $dlg.Height                = 400
+    $dlg.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+    $dlg.Owner                 = $window
+    $dlg.Background            = B 0x1E 0x20 0x30
+    $dlg.ResizeMode            = [System.Windows.ResizeMode]::CanResize
+    $dlg.MinWidth              = 400
+    $dlg.MinHeight             = 300
+
+    $mainSp = New-Object System.Windows.Controls.DockPanel
+    $mainSp.Margin = [System.Windows.Thickness]::new(15)
+
+    $titleTb = New-Object System.Windows.Controls.TextBlock
+    $titleTb.Text       = "Clipboard Transfer"
+    $titleTb.Foreground = [System.Windows.Media.Brushes]::White
+    $titleTb.FontSize   = 18
+    $titleTb.FontWeight = [System.Windows.FontWeights]::SemiBold
+    $titleTb.Margin     = [System.Windows.Thickness]::new(0, 0, 0, 4)
+    [System.Windows.Controls.DockPanel]::SetDock($titleTb, "Top")
+    $mainSp.Children.Add($titleTb) | Out-Null
+
+    $helpTb = New-Object System.Windows.Controls.TextBlock
+    $helpTb.Text        = "Use 'Type to Remote' to emulate keystrokes and paste text into the remote session. 'Paste from PC Clipboard' retrieves your local clipboard into this box."
+    $helpTb.Foreground  = B 0x93 0x9A 0xB7
+    $helpTb.FontSize    = 12
+    $helpTb.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    $helpTb.Margin      = [System.Windows.Thickness]::new(0, 0, 0, 10)
+    [System.Windows.Controls.DockPanel]::SetDock($helpTb, "Top")
+    $mainSp.Children.Add($helpTb) | Out-Null
+
+    $btnPanel = New-Object System.Windows.Controls.StackPanel
+    $btnPanel.Orientation       = [System.Windows.Controls.Orientation]::Horizontal
+    $btnPanel.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $btnPanel.Margin            = [System.Windows.Thickness]::new(0, 10, 0, 0)
+    [System.Windows.Controls.DockPanel]::SetDock($btnPanel, "Bottom")
+
+    $btnPaste = Make-DlgBtn "Paste from PC Clipboard" $false; $btnPaste.Margin = [System.Windows.Thickness]::new(0, 0, 6, 0)
+    $btnSend  = Make-DlgBtn "Type to Remote" $true;           $btnSend.Margin  = [System.Windows.Thickness]::new(0, 0, 6, 0)
+    $btnClose = Make-DlgBtn "Close" $false
+    $btnPanel.Children.Add($btnPaste) | Out-Null
+    $btnPanel.Children.Add($btnSend)  | Out-Null
+    $btnPanel.Children.Add($btnClose) | Out-Null
+    $mainSp.Children.Add($btnPanel) | Out-Null
+
+    $statusLbl = New-Object System.Windows.Controls.TextBlock
+    $statusLbl.Text     = ""
+    $statusLbl.FontSize = 12
+    $statusLbl.Foreground = B 0xCA 0xD3 0xF5
+    $statusLbl.Margin   = [System.Windows.Thickness]::new(0, 6, 0, 0)
+    [System.Windows.Controls.DockPanel]::SetDock($statusLbl, "Bottom")
+    $mainSp.Children.Add($statusLbl) | Out-Null
+
+    $clipTb = New-Object System.Windows.Controls.TextBox
+    $clipTb.AcceptsReturn           = $true
+    $clipTb.AcceptsTab              = $true
+    $clipTb.TextWrapping            = [System.Windows.TextWrapping]::Wrap
+    $clipTb.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+    $clipTb.FontSize                = 14
+    $clipTb.FontFamily              = New-Object System.Windows.Media.FontFamily("Consolas")
+    $clipTb.Background              = B 0x24 0x27 0x3A
+    $clipTb.Foreground              = [System.Windows.Media.Brushes]::White
+    $clipTb.BorderBrush             = B 0x49 0x4D 0x64
+    $clipTb.Padding                 = [System.Windows.Thickness]::new(8)
+    try { if ([System.Windows.Clipboard]::ContainsText()) { $clipTb.Text = [System.Windows.Clipboard]::GetText() } } catch {}
+    $mainSp.Children.Add($clipTb) | Out-Null
+
     $btnPaste.Add_Click({
-        try{
-            if([System.Windows.Clipboard]::ContainsText()){ $clipTb.Text=[System.Windows.Clipboard]::GetText(); $statusLbl.Text="Pasted from local clipboard." }
-            else{ $statusLbl.Text="Local clipboard is empty." }
-        }catch{ $statusLbl.Text="Failed to read clipboard." }
+        try {
+            if ([System.Windows.Clipboard]::ContainsText()) { $clipTb.Text = [System.Windows.Clipboard]::GetText(); $statusLbl.Text = "Pasted from local clipboard." }
+            else { $statusLbl.Text = "Local clipboard is empty." }
+        } catch { $statusLbl.Text = "Failed to read clipboard." }
     })
     $btnSend.Add_Click({
-        $text=$clipTb.Text
-        if($text.Length -eq 0){ $statusLbl.Text="Nothing to send."; return }
-        if($null -ne $script:vncEngine -and $script:vncEngine.IsConnected){
+        $text = $clipTb.Text
+        if ($text.Length -eq 0) { $statusLbl.Text = "Nothing to send."; return }
+        if ($null -ne $script:vncEngine -and $script:vncEngine.IsConnected) {
             $script:vncEngine.SendTextViaKeysAsync($text)
-            $statusLbl.Text="Typing $($text.Length) characters to remote..."; $statusLbl.Foreground=(B 0xCA 0xD3 0xF5)
-        } else { $statusLbl.Text="Not connected."; $statusLbl.Foreground=[System.Windows.Media.Brushes]::OrangeRed }
+            $statusLbl.Text = "Typing $($text.Length) characters to remote..."
+            $statusLbl.Foreground = B 0xCA 0xD3 0xF5
+        } else {
+            $statusLbl.Text = "Not connected."
+            $statusLbl.Foreground = [System.Windows.Media.Brushes]::OrangeRed
+        }
     })
     $btnClose.Add_Click({ $dlg.Close() })
-    $dlg.Content=$mainSp; $dlg.ShowDialog()|Out-Null
+
+    $dlg.Content = $mainSp
+    $dlg.ShowDialog() | Out-Null
     $vncCanvas.Focus()
 }
 
 # ============================================================
 # SETTINGS DIALOG
 # ============================================================
-function Show-SettingsDialog{
-    $dlg=New-Object System.Windows.Window
-    $dlg.Title=""; $dlg.Width=420
-    $dlg.SizeToContent=[System.Windows.SizeToContent]::Height
-    $dlg.WindowStyle=[System.Windows.WindowStyle]::None
-    $dlg.ResizeMode=[System.Windows.ResizeMode]::NoResize
-    $dlg.WindowStartupLocation=[System.Windows.WindowStartupLocation]::CenterOwner
-    $dlg.Owner=$window; $dlg.Background=(B 0x1E 0x20 0x30)
-    $dlg.BorderBrush=(B 0x49 0x4D 0x64); $dlg.BorderThickness=New-Object System.Windows.Thickness(1)
+function Show-SettingsDialog {
+    $dlg, $mainDock = New-DarkDialog "VNC Settings" 420
 
-    $mainDock=New-Object System.Windows.Controls.DockPanel
-    
-    # Custom Title Bar
-    $titleBar=New-Object System.Windows.Controls.Border
-    $titleBar.Background=(B 0x24 0x27 0x3A)
-    $titleBar.Padding=New-Object System.Windows.Thickness(10,8,10,8)
-    [System.Windows.Controls.DockPanel]::SetDock($titleBar,[System.Windows.Controls.Dock]::Top)
-    $titleText=New-Object System.Windows.Controls.TextBlock
-    $titleText.Text="VNC Settings"; $titleText.Foreground=(B 0xCA 0xD3 0xF5)
-    $titleText.FontSize=14; $titleText.FontWeight=[System.Windows.FontWeights]::SemiBold
-    $titleBar.Child=$titleText
-    $titleBar.Add_MouseLeftButtonDown({ $dlg.DragMove() })
-    $mainDock.Children.Add($titleBar)|Out-Null
+    $bsp = New-Object System.Windows.Controls.StackPanel
+    $bsp.Orientation        = [System.Windows.Controls.Orientation]::Horizontal
+    $bsp.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $bsp.Margin             = [System.Windows.Thickness]::new(20, 0, 20, 20)
+    [System.Windows.Controls.DockPanel]::SetDock($bsp, [System.Windows.Controls.Dock]::Bottom)
 
-    $bsp=New-Object System.Windows.Controls.StackPanel; $bsp.Orientation=[System.Windows.Controls.Orientation]::Horizontal; $bsp.HorizontalAlignment=[System.Windows.HorizontalAlignment]::Right
-    $bsp.Margin=[System.Windows.Thickness]::new(20,0,20,20)
-    [System.Windows.Controls.DockPanel]::SetDock($bsp,[System.Windows.Controls.Dock]::Bottom)
-    $sv=Make-DlgBtn "Save" $true; $sv.Width=90; $sv.Margin=[System.Windows.Thickness]::new(0,0,8,0)
-    $ca=Make-DlgBtn "Cancel" $false; $ca.Width=90
-    $sv.Add_Click({$dlg.Tag="OK";$dlg.Close()}); $ca.Add_Click({$dlg.Tag="Cancel";$dlg.Close()})
-    $bsp.Children.Add($sv)|Out-Null; $bsp.Children.Add($ca)|Out-Null
-    $mainDock.Children.Add($bsp)|Out-Null
+    $sv = Make-DlgBtn "Save"   $true;  $sv.Width = 90; $sv.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+    $ca = Make-DlgBtn "Cancel" $false; $ca.Width = 90
+    $sv.Add_Click({ $dlg.Tag = "OK";     $dlg.Close() })
+    $ca.Add_Click({ $dlg.Tag = "Cancel"; $dlg.Close() })
+    $bsp.Children.Add($sv) | Out-Null
+    $bsp.Children.Add($ca) | Out-Null
+    $mainDock.Children.Add($bsp) | Out-Null
 
-    $sp=New-Object System.Windows.Controls.StackPanel; $sp.Margin=[System.Windows.Thickness]::new(20,20,20,12)
-    $grayFg=(B 0xB8 0xC0 0xE0)
-    $t2=New-Object System.Windows.Controls.TextBlock; $t2.Text="Changes apply to new connections (except where noted)."
-    $t2.Foreground=(B 0x93 0x9A 0xB7); $t2.FontSize=12; $t2.FontStyle=[System.Windows.FontStyles]::Italic
-    $t2.Margin=[System.Windows.Thickness]::new(0,0,0,16); $sp.Children.Add($t2)|Out-Null
-    
-    $rrSp=New-Object System.Windows.Controls.StackPanel; $rrSp.Margin=[System.Windows.Thickness]::new(0,0,0,12)
-    $rrL=New-Object System.Windows.Controls.TextBlock; $rrL.Text="Refresh Rate (applies immediately):"; $rrL.Foreground=$grayFg; $rrL.FontSize=13
-    $rrL.Margin=[System.Windows.Thickness]::new(0,0,0,4); $rrSp.Children.Add($rrL)|Out-Null
-    
-    $rrCombo=New-Object System.Windows.Controls.ComboBox
-    $rrCombo.Style=$window.FindResource("DarkComboBox")
-    $rrCombo.FontSize=13; $rrCombo.Height=32
-    $i1=New-Object System.Windows.Controls.ComboBoxItem; $i1.Content="~60 FPS (16 ms)"
-    $i2=New-Object System.Windows.Controls.ComboBoxItem; $i2.Content="~30 FPS (33 ms)"
-    $rrCombo.Items.Add($i1)|Out-Null; $rrCombo.Items.Add($i2)|Out-Null
-    $rrCombo.SelectedIndex=$(if($script:vncSettings.RefreshRate -le 16){0}else{1})
-    $rrSp.Children.Add($rrCombo)|Out-Null; $sp.Children.Add($rrSp)|Out-Null
+    $sp = New-Object System.Windows.Controls.StackPanel
+    $sp.Margin   = [System.Windows.Thickness]::new(20, 20, 20, 12)
+    $grayFg      = B 0xB8 0xC0 0xE0
 
-    $dcSp=New-Object System.Windows.Controls.StackPanel; $dcSp.Margin=[System.Windows.Thickness]::new(0,0,0,12)
-    $dcL=New-Object System.Windows.Controls.TextBlock; $dcL.Text="Dropdown History Count (applies immediately):"; $dcL.Foreground=$grayFg; $dcL.FontSize=13
-    $dcL.Margin=[System.Windows.Thickness]::new(0,0,0,4); $dcSp.Children.Add($dcL)|Out-Null
-    $dcCombo=New-Object System.Windows.Controls.ComboBox
-    $dcCombo.Style=$window.FindResource("DarkComboBox")
-    $dcCombo.FontSize=13; $dcCombo.Height=32
-    $dcVals=@(3,5,10,15,20)
-    foreach($v in $dcVals){
-        $item=New-Object System.Windows.Controls.ComboBoxItem; $item.Content="$v items"; $item.Tag=$v
-        $dcCombo.Items.Add($item)|Out-Null
-        if($script:vncSettings.DropDownCount -eq $v){ $dcCombo.SelectedItem=$item }
+    $t2 = New-Object System.Windows.Controls.TextBlock
+    $t2.Text       = "Changes apply to new connections (except where noted)."
+    $t2.Foreground = B 0x93 0x9A 0xB7
+    $t2.FontSize   = 12
+    $t2.FontStyle  = [System.Windows.FontStyles]::Italic
+    $t2.Margin     = [System.Windows.Thickness]::new(0, 0, 0, 16)
+    $sp.Children.Add($t2) | Out-Null
+
+    # Refresh rate
+    $rrSp = New-Object System.Windows.Controls.StackPanel; $rrSp.Margin = [System.Windows.Thickness]::new(0, 0, 0, 12)
+    $rrL  = New-Object System.Windows.Controls.TextBlock; $rrL.Text = "Refresh Rate (applies immediately):"; $rrL.Foreground = $grayFg; $rrL.FontSize = 13; $rrL.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
+    $rrCombo = New-Object System.Windows.Controls.ComboBox; $rrCombo.Style = $window.FindResource("DarkComboBox"); $rrCombo.FontSize = 13; $rrCombo.Height = 32
+    $i1 = New-Object System.Windows.Controls.ComboBoxItem; $i1.Content = "~60 FPS (16 ms)"
+    $i2 = New-Object System.Windows.Controls.ComboBoxItem; $i2.Content = "~30 FPS (33 ms)"
+    $rrCombo.Items.Add($i1) | Out-Null; $rrCombo.Items.Add($i2) | Out-Null
+    $rrCombo.SelectedIndex = if ($script:vncSettings.RefreshRate -le 16) { 0 } else { 1 }
+    $rrSp.Children.Add($rrL) | Out-Null; $rrSp.Children.Add($rrCombo) | Out-Null; $sp.Children.Add($rrSp) | Out-Null
+
+    # Dropdown count
+    $dcSp = New-Object System.Windows.Controls.StackPanel; $dcSp.Margin = [System.Windows.Thickness]::new(0, 0, 0, 12)
+    $dcL  = New-Object System.Windows.Controls.TextBlock; $dcL.Text = "Dropdown History Count (applies immediately):"; $dcL.Foreground = $grayFg; $dcL.FontSize = 13; $dcL.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
+    $dcCombo = New-Object System.Windows.Controls.ComboBox; $dcCombo.Style = $window.FindResource("DarkComboBox"); $dcCombo.FontSize = 13; $dcCombo.Height = 32
+    foreach ($v in @(3, 5, 10, 15, 20)) {
+        $item = New-Object System.Windows.Controls.ComboBoxItem; $item.Content = "$v items"; $item.Tag = $v
+        $dcCombo.Items.Add($item) | Out-Null
+        if ($script:vncSettings.DropDownCount -eq $v) { $dcCombo.SelectedItem = $item }
     }
-    if($null -eq $dcCombo.SelectedItem){ $dcCombo.SelectedIndex=1 }
-    $dcSp.Children.Add($dcCombo)|Out-Null; $sp.Children.Add($dcSp)|Out-Null
-    
-    $cbShared=New-Object System.Windows.Controls.CheckBox; $cbShared.Content="  Shared Connection (allow others)"; $cbShared.Foreground=$grayFg; $cbShared.FontSize=13
-    $cbShared.IsChecked=$script:vncSettings.SharedConnection; $cbShared.Margin=[System.Windows.Thickness]::new(0,0,0,8); $sp.Children.Add($cbShared)|Out-Null
-    
-    $cbVO=New-Object System.Windows.Controls.CheckBox; $cbVO.Content="  View Only (applies immediately)"; $cbVO.Foreground=$grayFg; $cbVO.FontSize=13
-    $cbVO.IsChecked=$script:vncSettings.ViewOnly; $cbVO.Margin=[System.Windows.Thickness]::new(0,0,0,8); $sp.Children.Add($cbVO)|Out-Null
-    
-    $cbClip=New-Object System.Windows.Controls.CheckBox; $cbClip.Content="  Auto Clipboard Sync (applies immediately)"; $cbClip.Foreground=$grayFg; $cbClip.FontSize=13
-    $cbClip.IsChecked=$script:vncSettings.ClipboardSync; $cbClip.Margin=[System.Windows.Thickness]::new(0,0,0,0); $sp.Children.Add($cbClip)|Out-Null
-    
-    $mainDock.Children.Add($sp)|Out-Null
-    $dlg.Content=$mainDock; $dlg.ShowDialog()|Out-Null
-    if($dlg.Tag -eq "OK"){
-        $script:vncSettings.RefreshRate=@(16,33)[$rrCombo.SelectedIndex]
-        $script:vncSettings.SharedConnection=[bool]$cbShared.IsChecked
-        $script:vncSettings.ViewOnly=[bool]$cbVO.IsChecked
-        $script:vncSettings.ClipboardSync=[bool]$cbClip.IsChecked
-        $selItem=$dcCombo.SelectedItem
-        if($null -ne $selItem){ $script:vncSettings.DropDownCount=[int]$selItem.Tag }
+    if ($null -eq $dcCombo.SelectedItem) { $dcCombo.SelectedIndex = 1 }
+    $dcSp.Children.Add($dcL) | Out-Null; $dcSp.Children.Add($dcCombo) | Out-Null; $sp.Children.Add($dcSp) | Out-Null
+
+    $cbShared = New-Object System.Windows.Controls.CheckBox; $cbShared.Content = "  Shared Connection (allow others)";     $cbShared.Foreground = $grayFg; $cbShared.FontSize = 13; $cbShared.IsChecked = $script:vncSettings.SharedConnection; $cbShared.Margin = [System.Windows.Thickness]::new(0,0,0,8); $sp.Children.Add($cbShared) | Out-Null
+    $cbVO     = New-Object System.Windows.Controls.CheckBox; $cbVO.Content     = "  View Only (applies immediately)";       $cbVO.Foreground     = $grayFg; $cbVO.FontSize     = 13; $cbVO.IsChecked     = $script:vncSettings.ViewOnly;         $cbVO.Margin     = [System.Windows.Thickness]::new(0,0,0,8); $sp.Children.Add($cbVO)     | Out-Null
+    $cbClip   = New-Object System.Windows.Controls.CheckBox; $cbClip.Content   = "  Auto Clipboard Sync (applies immediately)"; $cbClip.Foreground = $grayFg; $cbClip.FontSize = 13; $cbClip.IsChecked   = $script:vncSettings.ClipboardSync;    $cbClip.Margin   = [System.Windows.Thickness]::new(0,0,0,0); $sp.Children.Add($cbClip)   | Out-Null
+
+    $mainDock.Children.Add($sp) | Out-Null
+    $dlg.ShowDialog() | Out-Null
+
+    if ($dlg.Tag -eq "OK") {
+        $script:vncSettings.RefreshRate      = @(16, 33)[$rrCombo.SelectedIndex]
+        $script:vncSettings.SharedConnection = [bool]$cbShared.IsChecked
+        $script:vncSettings.ViewOnly         = [bool]$cbVO.IsChecked
+        $script:vncSettings.ClipboardSync    = [bool]$cbClip.IsChecked
+        $selItem = $dcCombo.SelectedItem
+        if ($null -ne $selItem) { $script:vncSettings.DropDownCount = [int]$selItem.Tag }
         Save-VncSettings
-        # Trim existing lists if the new count is smaller
-        while($script:recentHosts.Count -gt $script:vncSettings.DropDownCount){ $script:recentHosts.RemoveAt($script:recentHosts.Count-1) }
-        while($script:recentPasswords.Count -gt $script:vncSettings.DropDownCount){ $script:recentPasswords.RemoveAt($script:recentPasswords.Count-1) }
+        while ($script:recentHosts.Count     -gt $script:vncSettings.DropDownCount) { $script:recentHosts.RemoveAt($script:recentHosts.Count - 1) }
+        while ($script:recentPasswords.Count -gt $script:vncSettings.DropDownCount) { $script:recentPasswords.RemoveAt($script:recentPasswords.Count - 1) }
         Save-ConfigIni
-        if($null -ne $script:updateTimer){ $script:updateTimer.Interval=[TimeSpan]::FromMilliseconds($script:vncSettings.RefreshRate) }
-        if($null -ne $script:vncEngine){ $script:vncEngine.ViewOnly=$script:vncSettings.ViewOnly; $script:vncEngine.ClipboardSync=$script:vncSettings.ClipboardSync }
+        if ($null -ne $script:updateTimer) { $script:updateTimer.Interval = [TimeSpan]::FromMilliseconds($script:vncSettings.RefreshRate) }
+        if ($null -ne $script:vncEngine)   { $script:vncEngine.ViewOnly = $script:vncSettings.ViewOnly; $script:vncEngine.ClipboardSync = $script:vncSettings.ClipboardSync }
     }
     $vncCanvas.Focus()
 }
@@ -1027,450 +1303,626 @@ function Show-SettingsDialog{
 # ============================================================
 # STATS HELPERS
 # ============================================================
-function Format-DataSize([long]$b){ if($b -lt 1024){return "$b B"};if($b -lt 1MB){return "{0:N1} KB" -f ($b/1KB)};if($b -lt 1GB){return "{0:N1} MB" -f ($b/1MB)};return "{0:N2} GB" -f ($b/1GB) }
-function Format-Uptime([long]$ms){ $ts=[TimeSpan]::FromMilliseconds($ms);if($ts.TotalHours -ge 1){return "{0:D2}:{1:D2}:{2:D2}" -f [int]$ts.TotalHours,$ts.Minutes,$ts.Seconds};return "{0:D2}:{1:D2}" -f $ts.Minutes,$ts.Seconds }
-function Reset-Stats{ $txtFps.Text="--";$txtFrames.Text="--";$txtData.Text="--";$txtLatency.Text="--";$txtUptime.Text="--" }
-function Update-Stats{
-    if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}
-    $txtFps.Text="{0:N1}" -f $script:vncEngine.CurrentFps
-    $txtFrames.Text=$script:vncEngine.FrameCount.ToString("N0")
-    $txtData.Text=Format-DataSize $script:vncEngine.BytesReceived
-    $txtLatency.Text="$($script:vncEngine.LastPingMs) ms"
-    $txtUptime.Text=Format-Uptime $script:vncEngine.UptimeMs
+function Format-DataSize([long]$b) {
+    if ($b -lt 1KB) { return "$b B" }
+    if ($b -lt 1MB) { return "{0:N1} KB" -f ($b / 1KB) }
+    if ($b -lt 1GB) { return "{0:N1} MB" -f ($b / 1MB) }
+    return "{0:N2} GB" -f ($b / 1GB)
 }
-function Set-Connected([bool]$state){
-    if($state){
-        $btnConnect.Visibility=[System.Windows.Visibility]::Collapsed
-        $btnDisconnect.Visibility=[System.Windows.Visibility]::Visible
-        $sep1.Visibility=[System.Windows.Visibility]::Visible
-        $btnFitWindow.Visibility=[System.Windows.Visibility]::Visible
-        $btnFullScreen.Visibility=[System.Windows.Visibility]::Visible
-        $btnClipboard.Visibility=[System.Windows.Visibility]::Visible
-        $sep2.Visibility=[System.Windows.Visibility]::Visible
-        
-        $statusDot.Fill=(B 0xA6 0xDA 0x95); $noConnectionOverlay.Visibility=[System.Windows.Visibility]::Collapsed
+
+function Format-Uptime([long]$ms) {
+    $ts = [TimeSpan]::FromMilliseconds($ms)
+    if ($ts.TotalHours -ge 1) { return "{0:D2}:{1:D2}:{2:D2}" -f [int]$ts.TotalHours, $ts.Minutes, $ts.Seconds }
+    return "{0:D2}:{1:D2}" -f $ts.Minutes, $ts.Seconds
+}
+
+function Reset-Stats {
+    $txtFps.Text = "--"; $txtFrames.Text = "--"; $txtData.Text = "--"; $txtLatency.Text = "--"; $txtUptime.Text = "--"
+}
+
+function Update-Stats {
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    $txtFps.Text     = "{0:N1}" -f $script:vncEngine.CurrentFps
+    $txtFrames.Text  = $script:vncEngine.FrameCount.ToString("N0")
+    $txtData.Text    = Format-DataSize $script:vncEngine.BytesReceived
+    $txtLatency.Text = "$($script:vncEngine.LastPingMs) ms"
+    $txtUptime.Text  = Format-Uptime $script:vncEngine.UptimeMs
+}
+
+function Set-Connected([bool]$state) {
+    if ($state) {
+        $btnConnect.Visibility     = [System.Windows.Visibility]::Collapsed
+        $btnDisconnect.Visibility  = [System.Windows.Visibility]::Visible
+        $sep1.Visibility           = [System.Windows.Visibility]::Visible
+        $btnFitWindow.Visibility   = [System.Windows.Visibility]::Visible
+        $btnFullScreen.Visibility  = [System.Windows.Visibility]::Visible
+        $btnClipboard.Visibility   = [System.Windows.Visibility]::Visible
+        $sep2.Visibility           = [System.Windows.Visibility]::Visible
+        $statusDot.Fill            = B 0xA6 0xDA 0x95
+        $noConnectionOverlay.Visibility = [System.Windows.Visibility]::Collapsed
     } else {
-        $btnConnect.Visibility=[System.Windows.Visibility]::Visible
-        $btnDisconnect.Visibility=[System.Windows.Visibility]::Collapsed
-        $sep1.Visibility=[System.Windows.Visibility]::Collapsed
-        $btnFitWindow.Visibility=[System.Windows.Visibility]::Collapsed
-        $btnFullScreen.Visibility=[System.Windows.Visibility]::Collapsed
-        $btnClipboard.Visibility=[System.Windows.Visibility]::Collapsed
-        $sep2.Visibility=[System.Windows.Visibility]::Collapsed
-        
-        $statusDot.Fill=(B 0xED 0x87 0x96); $txtStatus.Text="Disconnected"; $txtResolution.Text=""; Reset-Stats
+        $btnConnect.Visibility     = [System.Windows.Visibility]::Visible
+        $btnDisconnect.Visibility  = [System.Windows.Visibility]::Collapsed
+        $sep1.Visibility           = [System.Windows.Visibility]::Collapsed
+        $btnFitWindow.Visibility   = [System.Windows.Visibility]::Collapsed
+        $btnFullScreen.Visibility  = [System.Windows.Visibility]::Collapsed
+        $btnClipboard.Visibility   = [System.Windows.Visibility]::Collapsed
+        $sep2.Visibility           = [System.Windows.Visibility]::Collapsed
+        $statusDot.Fill            = B 0xED 0x87 0x96
+        $txtStatus.Text            = "Disconnected"
+        $txtResolution.Text        = ""
+        Reset-Stats
     }
 }
 
 # ============================================================
 # FULLSCREEN
 # ============================================================
-function Enter-FullScreen{
-    if($script:isFullScreen){return}; $script:isFullScreen=$true
-    if($script:panelOpen){ Hide-SidePanel }
-    $script:savedWindowState=$window.WindowState; $script:savedWindowStyle=$window.WindowStyle
-    $script:savedWindowRect=@{Left=$window.Left;Top=$window.Top;Width=$window.Width;Height=$window.Height}
-    $script:savedResizeMode=$window.ResizeMode
-    $window.WindowState=[System.Windows.WindowState]::Normal
-    $toolbarBorder.Visibility=[System.Windows.Visibility]::Collapsed; $statsBorder.Visibility=[System.Windows.Visibility]::Collapsed
-    $window.WindowStyle=[System.Windows.WindowStyle]::None; $window.ResizeMode=[System.Windows.ResizeMode]::NoResize
-    $window.Topmost=$true
-    $screen=[System.Windows.SystemParameters]::PrimaryScreenWidth; $screenH=[System.Windows.SystemParameters]::PrimaryScreenHeight
-    $window.Left=0; $window.Top=0; $window.Width=$screen; $window.Height=$screenH
-    $window.WindowState=[System.Windows.WindowState]::Normal
-    if(-not $script:fitMode){ $script:fitMode=$true; Apply-FitMode }
-    $fsHoverZone.Visibility=[System.Windows.Visibility]::Visible
-    $dispName=$script:activeSessionKey; $entry=Find-HistoryEntry $script:activeSessionKey
-    if($null -ne $entry){ $dispName=Get-SessionDisplayName $entry }
-    $fsSessionName.Text=$dispName; $btnFullScreen.Content="Windowed"
+function Enter-FullScreen {
+    if ($script:isFullScreen) { return }
+    $script:isFullScreen = $true
+    if ($script:panelOpen) { Hide-SidePanel }
+    $script:savedWindowState  = $window.WindowState
+    $script:savedWindowStyle  = $window.WindowStyle
+    $script:savedWindowRect   = @{ Left=$window.Left; Top=$window.Top; Width=$window.Width; Height=$window.Height }
+    $script:savedResizeMode   = $window.ResizeMode
+    $window.WindowState       = [System.Windows.WindowState]::Normal
+    $toolbarBorder.Visibility = [System.Windows.Visibility]::Collapsed
+    $statsBorder.Visibility   = [System.Windows.Visibility]::Collapsed
+    $window.WindowStyle       = [System.Windows.WindowStyle]::None
+    $window.ResizeMode        = [System.Windows.ResizeMode]::NoResize
+    $window.Topmost           = $true
+    $screen  = [System.Windows.SystemParameters]::PrimaryScreenWidth
+    $screenH = [System.Windows.SystemParameters]::PrimaryScreenHeight
+    $window.Left = 0; $window.Top = 0; $window.Width = $screen; $window.Height = $screenH
+    if (-not $script:fitMode) { $script:fitMode = $true; Apply-FitMode }
+    $fsHoverZone.Visibility = [System.Windows.Visibility]::Visible
+    $entry = Find-HistoryEntry $script:activeSessionKey
+    $fsSessionName.Text = if ($null -ne $entry) { Get-SessionDisplayName $entry } else { $script:activeSessionKey }
+    $btnFullScreen.Content = "Windowed"
 }
-function Exit-FullScreen{
-    if(-not $script:isFullScreen){return}; $script:isFullScreen=$false
-    $fullscreenBar.Height=0; $fsHoverZone.Visibility=[System.Windows.Visibility]::Collapsed; $script:fsBarVisible=$false
-    $window.Topmost=$false; $window.WindowStyle=$script:savedWindowStyle; $window.ResizeMode=$script:savedResizeMode
-    if($null -ne $script:savedWindowRect){ $window.Left=$script:savedWindowRect.Left; $window.Top=$script:savedWindowRect.Top; $window.Width=$script:savedWindowRect.Width; $window.Height=$script:savedWindowRect.Height }
-    $window.WindowState=$script:savedWindowState
-    $toolbarBorder.Visibility=[System.Windows.Visibility]::Visible; $statsBorder.Visibility=[System.Windows.Visibility]::Visible
-    $btnFullScreen.Content="Full Screen"
+
+function Exit-FullScreen {
+    if (-not $script:isFullScreen) { return }
+    $script:isFullScreen   = $false
+    $fullscreenBar.Height  = 0
+    $fsHoverZone.Visibility = [System.Windows.Visibility]::Collapsed
+    $script:fsBarVisible   = $false
+    $window.Topmost        = $false
+    $window.WindowStyle    = $script:savedWindowStyle
+    $window.ResizeMode     = $script:savedResizeMode
+    if ($null -ne $script:savedWindowRect) {
+        $window.Left   = $script:savedWindowRect.Left
+        $window.Top    = $script:savedWindowRect.Top
+        $window.Width  = $script:savedWindowRect.Width
+        $window.Height = $script:savedWindowRect.Height
+    }
+    $window.WindowState       = $script:savedWindowState
+    $toolbarBorder.Visibility = [System.Windows.Visibility]::Visible
+    $statsBorder.Visibility   = [System.Windows.Visibility]::Visible
+    $btnFullScreen.Content    = "Full Screen"
 }
-function Show-FullscreenBar{
-    if($script:fsBarVisible){return}; $script:fsBarVisible=$true; $fullscreenBar.Height=44
-    if($null -ne $script:fsBarTimer){ $script:fsBarTimer.Stop() }
-    $script:fsBarTimer=New-Object System.Windows.Threading.DispatcherTimer; $script:fsBarTimer.Interval=[TimeSpan]::FromSeconds(3)
+
+function Show-FullscreenBar {
+    if ($script:fsBarVisible) { return }
+    $script:fsBarVisible  = $true
+    $fullscreenBar.Height = 44
+    if ($null -ne $script:fsBarTimer) { $script:fsBarTimer.Stop() }
+    $script:fsBarTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:fsBarTimer.Interval = [TimeSpan]::FromSeconds(3)
     $script:fsBarTimer.Add_Tick({ $script:fsBarTimer.Stop(); Hide-FullscreenBar })
     $script:fsBarTimer.Start()
 }
-function Hide-FullscreenBar{ $script:fsBarVisible=$false; $fullscreenBar.Height=0 }
+
+function Hide-FullscreenBar { $script:fsBarVisible = $false; $fullscreenBar.Height = 0 }
 
 # ============================================================
 # FIT MODE
 # ============================================================
-function Apply-FitMode{
-    $vncImage.Stretch=[System.Windows.Media.Stretch]::Uniform
-    $wb=New-Object System.Windows.Data.Binding("ViewportWidth"); $wb.Source=$scrollViewer
-    $hb=New-Object System.Windows.Data.Binding("ViewportHeight"); $hb.Source=$scrollViewer
-    $vncCanvas.SetBinding([System.Windows.FrameworkElement]::WidthProperty,$wb); $vncCanvas.SetBinding([System.Windows.FrameworkElement]::HeightProperty,$hb)
-    $iwb=New-Object System.Windows.Data.Binding("ViewportWidth"); $iwb.Source=$scrollViewer
-    $ihb=New-Object System.Windows.Data.Binding("ViewportHeight"); $ihb.Source=$scrollViewer
-    $vncImage.SetBinding([System.Windows.FrameworkElement]::WidthProperty,$iwb); $vncImage.SetBinding([System.Windows.FrameworkElement]::HeightProperty,$ihb)
-    $scrollViewer.HorizontalScrollBarVisibility=[System.Windows.Controls.ScrollBarVisibility]::Disabled
-    $scrollViewer.VerticalScrollBarVisibility=[System.Windows.Controls.ScrollBarVisibility]::Disabled
+function Apply-FitMode {
+    $vncImage.Stretch = [System.Windows.Media.Stretch]::Uniform
+    $wb = New-Object System.Windows.Data.Binding("ViewportWidth");  $wb.Source = $scrollViewer
+    $hb = New-Object System.Windows.Data.Binding("ViewportHeight"); $hb.Source = $scrollViewer
+    $vncCanvas.SetBinding([System.Windows.FrameworkElement]::WidthProperty,  $wb)
+    $vncCanvas.SetBinding([System.Windows.FrameworkElement]::HeightProperty, $hb)
+    $iwb = New-Object System.Windows.Data.Binding("ViewportWidth");  $iwb.Source = $scrollViewer
+    $ihb = New-Object System.Windows.Data.Binding("ViewportHeight"); $ihb.Source = $scrollViewer
+    $vncImage.SetBinding([System.Windows.FrameworkElement]::WidthProperty,  $iwb)
+    $vncImage.SetBinding([System.Windows.FrameworkElement]::HeightProperty, $ihb)
+    $scrollViewer.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Disabled
+    $scrollViewer.VerticalScrollBarVisibility   = [System.Windows.Controls.ScrollBarVisibility]::Disabled
 }
-function Remove-FitMode{
-    $vncImage.Stretch=[System.Windows.Media.Stretch]::None
-    foreach($dp in @([System.Windows.FrameworkElement]::WidthProperty,[System.Windows.FrameworkElement]::HeightProperty)){
-        [System.Windows.Data.BindingOperations]::ClearBinding($vncCanvas,$dp); [System.Windows.Data.BindingOperations]::ClearBinding($vncImage,$dp)
+
+function Remove-FitMode {
+    $vncImage.Stretch = [System.Windows.Media.Stretch]::None
+    foreach ($dp in @([System.Windows.FrameworkElement]::WidthProperty, [System.Windows.FrameworkElement]::HeightProperty)) {
+        [System.Windows.Data.BindingOperations]::ClearBinding($vncCanvas, $dp)
+        [System.Windows.Data.BindingOperations]::ClearBinding($vncImage,  $dp)
     }
-    $vncImage.Width=[double]::NaN; $vncImage.Height=[double]::NaN
-    $scrollViewer.HorizontalScrollBarVisibility=[System.Windows.Controls.ScrollBarVisibility]::Auto
-    $scrollViewer.VerticalScrollBarVisibility=[System.Windows.Controls.ScrollBarVisibility]::Auto
-    if($null -ne $script:vncEngine){ $vncCanvas.Width=$script:vncEngine.FramebufferWidth; $vncCanvas.Height=$script:vncEngine.FramebufferHeight }
+    $vncImage.Width  = [double]::NaN
+    $vncImage.Height = [double]::NaN
+    $scrollViewer.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+    $scrollViewer.VerticalScrollBarVisibility   = [System.Windows.Controls.ScrollBarVisibility]::Auto
+    if ($null -ne $script:vncEngine) { $vncCanvas.Width = $script:vncEngine.FramebufferWidth; $vncCanvas.Height = $script:vncEngine.FramebufferHeight }
 }
 
 # ============================================================
 # SIDE PANEL
 # ============================================================
-function Hide-SidePanel{
-    $sidePanelCol.MinWidth=0; $sidePanelCol.Width=0; $panelSplitter.Visibility=[System.Windows.Visibility]::Collapsed
-    $script:panelOpen=$false; $btnTogglePanel.Content=[char]0x2630
-}
-function Show-SidePanel{
-    $sidePanelCol.MinWidth=160
-    $sidePanelCol.Width=New-Object System.Windows.GridLength($script:panelWidth)
-    $panelSplitter.Visibility=[System.Windows.Visibility]::Visible
-    $script:panelOpen=$true; $btnTogglePanel.Content=[char]0x2630; Update-SessionPanel
-}
-function Toggle-SidePanel{
-    if($script:panelOpen){ Hide-SidePanel } else { Show-SidePanel }
+function Hide-SidePanel {
+    $sidePanelCol.MinWidth          = 0
+    $sidePanelCol.Width             = 0
+    $panelSplitter.Visibility       = [System.Windows.Visibility]::Collapsed
+    $script:panelOpen               = $false
+    $btnTogglePanel.Content         = [char]0x2630
 }
 
-function New-PanelButton([string]$Line1,[string]$Line2,[System.Windows.Media.Brush]$DotColor,[bool]$IsCurrent,[scriptblock]$OnClick,[System.Windows.Controls.ContextMenu]$ContextMenu){
-    $btn=New-Object System.Windows.Controls.Button
-    # Use pre-defined XAML styles to ensure default button chrome is bypassed properly
-    if($IsCurrent){
-        $btn.Style=$window.FindResource("PanelBtnStyleCurrent")
-    } else {
-        $btn.Style=$window.FindResource("PanelBtnStyle")
-    }
-    $btn.HorizontalContentAlignment=[System.Windows.HorizontalAlignment]::Stretch
+function Show-SidePanel {
+    $sidePanelCol.MinWidth          = 160
+    $sidePanelCol.Width             = New-Object System.Windows.GridLength($script:panelWidth)
+    $panelSplitter.Visibility       = [System.Windows.Visibility]::Visible
+    $script:panelOpen               = $true
+    $btnTogglePanel.Content         = [char]0x2630
+    Update-SessionPanel
+}
 
-    $sp2=New-Object System.Windows.Controls.StackPanel
-    $row1=New-Object System.Windows.Controls.StackPanel; $row1.Orientation=[System.Windows.Controls.Orientation]::Horizontal
-    if($null -ne $DotColor){
-        $dot=New-Object System.Windows.Shapes.Ellipse; $dot.Width=8; $dot.Height=8; $dot.Fill=$DotColor
-        $dot.Margin=[System.Windows.Thickness]::new(0,0,6,0); $dot.VerticalAlignment=[System.Windows.VerticalAlignment]::Center
-        $row1.Children.Add($dot)|Out-Null
+function Toggle-SidePanel { if ($script:panelOpen) { Hide-SidePanel } else { Show-SidePanel } }
+
+function New-PanelButton([string]$Line1, [string]$Line2, [System.Windows.Media.Brush]$DotColor, [bool]$IsCurrent, [scriptblock]$OnClick, [System.Windows.Controls.ContextMenu]$ContextMenu) {
+    $btn = New-Object System.Windows.Controls.Button
+    $btn.Style = if ($IsCurrent) { $window.FindResource("PanelBtnStyleCurrent") } else { $window.FindResource("PanelBtnStyle") }
+    $btn.HorizontalContentAlignment = [System.Windows.HorizontalAlignment]::Stretch
+
+    $sp2  = New-Object System.Windows.Controls.StackPanel
+    $row1 = New-Object System.Windows.Controls.StackPanel
+    $row1.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+
+    if ($null -ne $DotColor) {
+        $dot = New-Object System.Windows.Shapes.Ellipse
+        $dot.Width = 8; $dot.Height = 8; $dot.Fill = $DotColor
+        $dot.Margin = [System.Windows.Thickness]::new(0, 0, 6, 0)
+        $dot.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $row1.Children.Add($dot) | Out-Null
     }
-    $tb1=New-Object System.Windows.Controls.TextBlock; $tb1.Text=$Line1; $tb1.FontSize=13
-    if($IsCurrent){ $tb1.FontWeight=[System.Windows.FontWeights]::Bold }
-    $row1.Children.Add($tb1)|Out-Null
-    if($IsCurrent){
-        $ar=New-Object System.Windows.Controls.TextBlock; $ar.Text="  <"; $ar.FontSize=11
-        $ar.VerticalAlignment=[System.Windows.VerticalAlignment]::Center
-        $row1.Children.Add($ar)|Out-Null
+
+    $tb1 = New-Object System.Windows.Controls.TextBlock
+    $tb1.Text   = $Line1
+    $tb1.FontSize = 13
+    if ($IsCurrent) { $tb1.FontWeight = [System.Windows.FontWeights]::Bold }
+    $row1.Children.Add($tb1) | Out-Null
+
+    if ($IsCurrent) {
+        $ar = New-Object System.Windows.Controls.TextBlock
+        $ar.Text = "  <"; $ar.FontSize = 11; $ar.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $row1.Children.Add($ar) | Out-Null
     }
-    $sp2.Children.Add($row1)|Out-Null
-    if($Line2){
-        $tb2=New-Object System.Windows.Controls.TextBlock; $tb2.Text=$Line2; $tb2.FontSize=11
-        $tb2.FontFamily=(New-Object System.Windows.Media.FontFamily("Consolas"))
-        $tb2.Margin=[System.Windows.Thickness]::new(14,2,0,0)
-        $tb2.TextWrapping=[System.Windows.TextWrapping]::Wrap
-        $sp2.Children.Add($tb2)|Out-Null
+
+    $sp2.Children.Add($row1) | Out-Null
+
+    if ($Line2) {
+        $tb2 = New-Object System.Windows.Controls.TextBlock
+        $tb2.Text        = $Line2
+        $tb2.FontSize    = 11
+        $tb2.FontFamily  = New-Object System.Windows.Media.FontFamily("Consolas")
+        $tb2.Margin      = [System.Windows.Thickness]::new(14, 2, 0, 0)
+        $tb2.TextWrapping = [System.Windows.TextWrapping]::Wrap
+        $sp2.Children.Add($tb2) | Out-Null
     }
-    $btn.Content=$sp2
-    if($OnClick){ $btn.Add_Click($OnClick) }
-    if($ContextMenu){ $btn.ContextMenu=$ContextMenu }
+
+    $btn.Content = $sp2
+    if ($OnClick)      { $btn.Add_Click($OnClick) }
+    if ($ContextMenu)  { $btn.ContextMenu = $ContextMenu }
     return $btn
 }
-function New-ContextMenu([string]$Key,[bool]$IsActive){
-    $ctx=New-Object System.Windows.Controls.ContextMenu
-    $entry=Find-HistoryEntry $Key; $pinned=($null -ne $entry -and $entry.Pinned)
-    if($IsActive){
-        $mi=New-Object System.Windows.Controls.MenuItem; $mi.Header="Disconnect"; $ck=$Key
-        $mi.Add_Click({ Disconnect-Session $ck }.GetNewClosure()); $ctx.Items.Add($mi)|Out-Null
-        $ctx.Items.Add((New-Object System.Windows.Controls.Separator))|Out-Null
+
+function New-ContextMenu([string]$Key, [bool]$IsActive) {
+    $ctx    = New-Object System.Windows.Controls.ContextMenu
+    $entry  = Find-HistoryEntry $Key
+    $pinned = ($null -ne $entry -and $entry.Pinned)
+
+    if ($IsActive) {
+        $mi = New-Object System.Windows.Controls.MenuItem; $mi.Header = "Disconnect"; $ck = $Key
+        $mi.Add_Click({ Disconnect-Session $ck }.GetNewClosure())
+        $ctx.Items.Add($mi) | Out-Null
+        $ctx.Items.Add((New-Object System.Windows.Controls.Separator)) | Out-Null
     }
-    $mi3=New-Object System.Windows.Controls.MenuItem; $mi3.Header=$(if($pinned){"Unpin"}else{"Pin"}); $ck3=$Key
-    $mi3.Add_Click({ Toggle-Pin $ck3 }.GetNewClosure()); $ctx.Items.Add($mi3)|Out-Null
-    if(-not $IsActive){
-        $ctx.Items.Add((New-Object System.Windows.Controls.Separator))|Out-Null
-        $mi4=New-Object System.Windows.Controls.MenuItem; $mi4.Header="Remove from history"; $ck4=$Key
-        $mi4.Add_Click({ Remove-HistoryEntry $ck4 }.GetNewClosure()); $ctx.Items.Add($mi4)|Out-Null
+
+    $mi3 = New-Object System.Windows.Controls.MenuItem; $mi3.Header = if ($pinned) { "Unpin" } else { "Pin" }; $ck3 = $Key
+    $mi3.Add_Click({ Toggle-Pin $ck3 }.GetNewClosure())
+    $ctx.Items.Add($mi3) | Out-Null
+
+    if (-not $IsActive) {
+        $ctx.Items.Add((New-Object System.Windows.Controls.Separator)) | Out-Null
+        $mi4 = New-Object System.Windows.Controls.MenuItem; $mi4.Header = "Remove from history"; $ck4 = $Key
+        $mi4.Add_Click({ Remove-HistoryEntry $ck4 }.GetNewClosure())
+        $ctx.Items.Add($mi4) | Out-Null
     }
     return $ctx
 }
-function Make-EmptyLabel([string]$Text){
-    $tb=New-Object System.Windows.Controls.TextBlock; $tb.Text="  $Text"; $tb.Foreground=(B 0x93 0x9A 0xB7)
-    $tb.FontSize=12; $tb.Margin=[System.Windows.Thickness]::new(10,8,10,8); $tb.FontStyle=[System.Windows.FontStyles]::Italic; return $tb
+
+function Make-EmptyLabel([string]$Text) {
+    $tb = New-Object System.Windows.Controls.TextBlock
+    $tb.Text       = "  $Text"
+    $tb.Foreground = B 0x93 0x9A 0xB7
+    $tb.FontSize   = 12
+    $tb.Margin     = [System.Windows.Thickness]::new(10, 8, 10, 8)
+    $tb.FontStyle  = [System.Windows.FontStyles]::Italic
+    return $tb
 }
-function Update-SessionPanel{
-    $pinnedSessionsList.Children.Clear(); $activeSessionsList.Children.Clear(); $recentSessionsList.Children.Clear()
-    # Pinned
-    $pinnedEntries=@($script:recentSessions | Where-Object {$_.Pinned})
-    if($pinnedEntries.Count -eq 0){ $pinnedSessionsList.Children.Add((Make-EmptyLabel "No pinned sessions"))|Out-Null }
-    else{
-        foreach($s in $pinnedEntries){
-            $k="$($s.Host):$($s.Port)"
-            $isAct=$script:activeSessions.ContainsKey($k); $isCur=($k -eq $script:activeSessionKey)
-            $dc=$null
-            if($isAct){ $eng=$script:activeSessions[$k]; $dc=$(if($eng.IsConnected){[System.Windows.Media.Brushes]::LimeGreen}else{[System.Windows.Media.Brushes]::OrangeRed}) }
-            $l1 = $s.Host
-            $l2 = "Port: $($s.Port)"
-            $cK=$k; $rH=$s.Host; $rP=$s.Port; $rPW=$s.Password
-            $oc=$(if($isAct){{ Switch-ToSession $cK }.GetNewClosure()}else{{ $txtHost.Text=$rH; $txtPort.Text=$rP.ToString(); if($rPW){ $script:syncingPw=$true; $txtPassword.Password=$rPW; $txtPasswordVisible.Text=$rPW; $script:syncingPw=$false }; Do-Connect }.GetNewClosure()})
-            $btn=New-PanelButton -Line1 $l1 -Line2 $l2 -DotColor $dc -IsCurrent $isCur -OnClick $oc -ContextMenu (New-ContextMenu $k $isAct)
-            $pinnedSessionsList.Children.Add($btn)|Out-Null
+
+function Update-SessionPanel {
+    $pinnedSessionsList.Children.Clear()
+    $activeSessionsList.Children.Clear()
+    $recentSessionsList.Children.Clear()
+
+    # --- Pinned ---
+    $pinnedEntries = @($script:recentSessions | Where-Object { $_.Pinned })
+    if ($pinnedEntries.Count -eq 0) {
+        $pinnedSessionsList.Children.Add((Make-EmptyLabel "No pinned sessions")) | Out-Null
+    } else {
+        foreach ($s in $pinnedEntries) {
+            $k     = "$($s.Host):$($s.Port)"
+            $isAct = $script:activeSessions.ContainsKey($k)
+            $isCur = ($k -eq $script:activeSessionKey)
+            $dc    = $null
+            if ($isAct) { $eng = $script:activeSessions[$k]; $dc = if ($eng.IsConnected) { [System.Windows.Media.Brushes]::LimeGreen } else { [System.Windows.Media.Brushes]::OrangeRed } }
+            $cK = $k; $rH = $s.Host; $rP = $s.Port; $rPW = $s.Password
+            $oc = if ($isAct) {
+                { Switch-ToSession $cK }.GetNewClosure()
+            } else {
+                {
+                    $txtHost.Text = $rH; $txtPort.Text = $rP.ToString()
+                    if ($rPW) { $script:syncingPw = $true; $txtPassword.Password = $rPW; $txtPasswordVisible.Text = $rPW; $script:syncingPw = $false }
+                    Do-Connect
+                }.GetNewClosure()
+            }
+            $btn = New-PanelButton -Line1 $s.Host -Line2 "" -DotColor $dc -IsCurrent $isCur -OnClick $oc -ContextMenu (New-ContextMenu $k $isAct)
+            $pinnedSessionsList.Children.Add($btn) | Out-Null
         }
     }
-    # Active
-    $addedAct=$false
-    foreach($k in @($script:activeSessions.Keys)){
-        $entry=Find-HistoryEntry $k; if($null -ne $entry -and $entry.Pinned){continue}; $addedAct=$true
-        $eng=$script:activeSessions[$k]; $isCur=($k -eq $script:activeSessionKey)
-        $dc=$(if($eng.IsConnected){[System.Windows.Media.Brushes]::LimeGreen}else{[System.Windows.Media.Brushes]::OrangeRed})
-        $dn=$k
-        $parts=$k -split ':'
-        $l1 = $parts[0]
-        $l2 = "Port: $($parts[1])"
-        $cK=$k
-        $btn=New-PanelButton -Line1 $l1 -Line2 $l2 -DotColor $dc -IsCurrent $isCur -OnClick { Switch-ToSession $cK }.GetNewClosure() -ContextMenu (New-ContextMenu $k $true)
-        $activeSessionsList.Children.Add($btn)|Out-Null
+
+    # --- Active ---
+    $addedAct = $false
+    foreach ($k in @($script:activeSessions.Keys)) {
+        $entry = Find-HistoryEntry $k
+        if ($null -ne $entry -and $entry.Pinned) { continue }
+        $addedAct = $true
+        $eng   = $script:activeSessions[$k]
+        $isCur = ($k -eq $script:activeSessionKey)
+        $dc    = if ($eng.IsConnected) { [System.Windows.Media.Brushes]::LimeGreen } else { [System.Windows.Media.Brushes]::OrangeRed }
+        $parts = $k -split ':'
+        $cK    = $k
+        $btn   = New-PanelButton -Line1 $parts[0] -Line2 "Port: $($parts[1])" -DotColor $dc -IsCurrent $isCur -OnClick { Switch-ToSession $cK }.GetNewClosure() -ContextMenu (New-ContextMenu $k $true)
+        $activeSessionsList.Children.Add($btn) | Out-Null
     }
-    if(-not $addedAct){ $activeSessionsList.Children.Add((Make-EmptyLabel "No active sessions"))|Out-Null }
-    # Recent
-    $hasRec=$false
-    foreach($s in $script:recentSessions){
-        $k="$($s.Host):$($s.Port)"
-        if($script:activeSessions.ContainsKey($k)){continue}; if($s.Pinned){continue}; $hasRec=$true
-        $l1 = $s.Host
-        $l2 = "Port: $($s.Port)"
-        $rH=$s.Host; $rP=$s.Port; $rPW=$s.Password
-        $btn=New-PanelButton -Line1 $l1 -Line2 $l2 -DotColor $null -IsCurrent $false -OnClick { $txtHost.Text=$rH; $txtPort.Text=$rP.ToString(); if($rPW){ $script:syncingPw=$true; $txtPassword.Password=$rPW; $txtPasswordVisible.Text=$rPW; $script:syncingPw=$false }; Do-Connect }.GetNewClosure() -ContextMenu (New-ContextMenu $k $false)
-        $recentSessionsList.Children.Add($btn)|Out-Null
+    if (-not $addedAct) { $activeSessionsList.Children.Add((Make-EmptyLabel "No active sessions")) | Out-Null }
+
+    # --- Recent (condensed, single line) ---
+    $hasRec = $false
+    foreach ($s in $script:recentSessions) {
+        $k = "$($s.Host):$($s.Port)"
+        if ($script:activeSessions.ContainsKey($k)) { continue }
+        if ($s.Pinned) { continue }
+        $hasRec = $true
+        $rH = $s.Host; $rP = $s.Port; $rPW = $s.Password
+        $btn = New-PanelButton -Line1 $s.Host -Line2 "" -DotColor $null -IsCurrent $false -OnClick {
+            $txtHost.Text = $rH; $txtPort.Text = $rP.ToString()
+            if ($rPW) { $script:syncingPw = $true; $txtPassword.Password = $rPW; $txtPasswordVisible.Text = $rPW; $script:syncingPw = $false }
+            Do-Connect
+        }.GetNewClosure() -ContextMenu (New-ContextMenu $k $false)
+        $recentSessionsList.Children.Add($btn) | Out-Null
     }
-    if(-not $hasRec){ $recentSessionsList.Children.Add((Make-EmptyLabel "No recent sessions"))|Out-Null }
+    if (-not $hasRec) { $recentSessionsList.Children.Add((Make-EmptyLabel "No recent sessions")) | Out-Null }
 }
 
 # ============================================================
 # SESSION MANAGEMENT
 # ============================================================
-function Switch-ToSession([string]$SessionKey){
-    if(-not $script:activeSessions.ContainsKey($SessionKey)){return}
-    if($SessionKey -eq $script:activeSessionKey){return}
-    if($null -ne $script:updateTimer){ $script:updateTimer.Stop(); $script:updateTimer=$null }
-    $script:writeableBmp=$null; $script:lastFrameVer=-1; $vncImage.Source=$null
-    $script:vncEngine=$script:activeSessions[$SessionKey]; $script:activeSessionKey=$SessionKey
-    if($script:vncEngine.IsConnected){
-        $fw=$script:vncEngine.FramebufferWidth; $fh=$script:vncEngine.FramebufferHeight
-        $entry=Find-HistoryEntry $SessionKey; $dn=$(if($null -ne $entry){Get-SessionDisplayName $entry}else{$SessionKey})
-        $parts=$SessionKey -split ':'; $txtHost.Text=$parts[0]; $txtPort.Text=$parts[1]
-        if($null -ne $entry -and $entry.Password){ $script:syncingPw=$true; $txtPassword.Password=$entry.Password; $txtPasswordVisible.Text=$entry.Password; $script:syncingPw=$false }
-        if($script:fitMode){ Apply-FitMode } else { $vncCanvas.Width=$fw; $vncCanvas.Height=$fh }
-        Set-Connected $true; $txtStatus.Text="Connected - $dn"; $txtResolution.Text="${fw} x ${fh}"
-        $script:updateTimer=New-Object System.Windows.Threading.DispatcherTimer
-        $script:updateTimer.Interval=[TimeSpan]::FromMilliseconds($script:vncSettings.RefreshRate)
-        $script:updateTimer.Add_Tick({ Update-Frame }); $script:updateTimer.Start()
-        $script:vncEngine.RequestFullRefresh(); $vncCanvas.Focus()
+function Switch-ToSession([string]$SessionKey) {
+    if (-not $script:activeSessions.ContainsKey($SessionKey)) { return }
+    if ($SessionKey -eq $script:activeSessionKey) { return }
+    if ($null -ne $script:updateTimer) { $script:updateTimer.Stop(); $script:updateTimer = $null }
+    $script:writeableBmp = $null; $script:lastFrameVer = -1; $vncImage.Source = $null
+    $script:vncEngine       = $script:activeSessions[$SessionKey]
+    $script:activeSessionKey = $SessionKey
+
+    if ($script:vncEngine.IsConnected) {
+        $fw    = $script:vncEngine.FramebufferWidth
+        $fh    = $script:vncEngine.FramebufferHeight
+        $parts = $SessionKey -split ':'
+        $txtHost.Text = $parts[0]; $txtPort.Text = $parts[1]
+        $entry = Find-HistoryEntry $SessionKey
+        if ($null -ne $entry -and $entry.Password) {
+            $script:syncingPw = $true; $txtPassword.Password = $entry.Password; $txtPasswordVisible.Text = $entry.Password; $script:syncingPw = $false
+        }
+        if ($script:fitMode) { Apply-FitMode } else { $vncCanvas.Width = $fw; $vncCanvas.Height = $fh }
+        $dn = if ($null -ne $entry) { Get-SessionDisplayName $entry } else { $SessionKey }
+        Set-Connected $true; $txtStatus.Text = "Connected - $dn"; $txtResolution.Text = "${fw} x ${fh}"
+        $script:updateTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:updateTimer.Interval = [TimeSpan]::FromMilliseconds($script:vncSettings.RefreshRate)
+        $script:updateTimer.Add_Tick({ Update-Frame })
+        $script:updateTimer.Start()
+        $script:vncEngine.RequestFullRefresh()
+        $vncCanvas.Focus()
     }
     Update-SessionPanel
 }
-function Disconnect-Session([string]$SessionKey){
-    if(-not $script:activeSessions.ContainsKey($SessionKey)){return}
-    $script:activeSessions[$SessionKey].Disconnect(); $script:activeSessions.Remove($SessionKey)
-    if($SessionKey -eq $script:activeSessionKey){ Stop-VncSession -KeepOthers }
+
+function Disconnect-Session([string]$SessionKey) {
+    if (-not $script:activeSessions.ContainsKey($SessionKey)) { return }
+    $script:activeSessions[$SessionKey].Disconnect()
+    $script:activeSessions.Remove($SessionKey)
+    if ($SessionKey -eq $script:activeSessionKey) { Stop-VncSession -KeepOthers }
     Update-SessionPanel
 }
-function Update-Frame{
-    if($null -eq $script:vncEngine){return}
-    if(-not $script:vncEngine.IsConnected){
-        $err=$script:vncEngine.LastError; $key=$script:activeSessionKey
-        if($null -ne $key -and $script:activeSessions.ContainsKey($key)){ $script:activeSessions.Remove($key) }
-        Stop-VncSession -KeepOthers; $txtStatus.Text="Lost: $err"; Update-SessionPanel; return
+
+function Purge-DeadSessions {
+    $dead = @($script:activeSessions.Keys | Where-Object { -not $script:activeSessions[$_].IsConnected })
+    if ($dead.Count -gt 0) {
+        foreach ($dk in $dead) { $script:activeSessions[$dk].Disconnect(); $script:activeSessions.Remove($dk) }
+        Update-SessionPanel
     }
-    $ver=$script:vncEngine.FrameVersion; if($ver -eq $script:lastFrameVer){return}; $script:lastFrameVer=$ver
-    $w=$script:vncEngine.FramebufferWidth; $h=$script:vncEngine.FramebufferHeight; $fb=$script:vncEngine.GetFrameBufferDirect()
-    if($null -eq $fb -or $w -le 0 -or $h -le 0){return}
-    if($null -eq $script:writeableBmp -or $script:writeableBmp.PixelWidth -ne $w -or $script:writeableBmp.PixelHeight -ne $h){
-        $script:writeableBmp=New-Object System.Windows.Media.Imaging.WriteableBitmap($w,$h,96,96,[System.Windows.Media.PixelFormats]::Bgr32,$null)
-        $vncImage.Source=$script:writeableBmp; if(-not $script:fitMode){ $vncCanvas.Width=$w; $vncCanvas.Height=$h }; $txtResolution.Text="${w} x ${h}"
-    }
-    try{ $script:writeableBmp.WritePixels((New-Object System.Windows.Int32Rect(0,0,$w,$h)),$fb,($w*4),0) }catch{}
 }
-function Stop-VncSession{
+
+function Update-Frame {
+    if ($null -eq $script:vncEngine) { return }
+    if (-not $script:vncEngine.IsConnected) {
+        $err = $script:vncEngine.LastError
+        $key = $script:activeSessionKey
+        if ($null -ne $key -and $script:activeSessions.ContainsKey($key)) { $script:activeSessions.Remove($key) }
+        Stop-VncSession -KeepOthers
+        $txtStatus.Text = "Lost: $err"
+        Update-SessionPanel
+        return
+    }
+    $ver = $script:vncEngine.FrameVersion
+    if ($ver -eq $script:lastFrameVer) { return }
+    $script:lastFrameVer = $ver
+    $w  = $script:vncEngine.FramebufferWidth
+    $h  = $script:vncEngine.FramebufferHeight
+    $fb = $script:vncEngine.GetFrameBufferDirect()
+    if ($null -eq $fb -or $w -le 0 -or $h -le 0) { return }
+    if ($null -eq $script:writeableBmp -or $script:writeableBmp.PixelWidth -ne $w -or $script:writeableBmp.PixelHeight -ne $h) {
+        $script:writeableBmp = New-Object System.Windows.Media.Imaging.WriteableBitmap($w, $h, 96, 96, [System.Windows.Media.PixelFormats]::Bgr32, $null)
+        $vncImage.Source = $script:writeableBmp
+        if (-not $script:fitMode) { $vncCanvas.Width = $w; $vncCanvas.Height = $h }
+        $txtResolution.Text = "${w} x ${h}"
+    }
+    try { $script:writeableBmp.WritePixels((New-Object System.Windows.Int32Rect(0, 0, $w, $h)), $fb, ($w * 4), 0) } catch {}
+}
+
+function Stop-VncSession {
     param([switch]$KeepOthers)
-    if($null -ne $script:updateTimer){ $script:updateTimer.Stop(); $script:updateTimer=$null }
-    if($KeepOthers){ $script:vncEngine=$null }
-    else{
-        if($null -ne $script:vncEngine){ $script:vncEngine.Disconnect(); $script:vncEngine=$null }
-        foreach($k in @($script:activeSessions.Keys)){ $script:activeSessions[$k].Disconnect() }
+    if ($null -ne $script:updateTimer) { $script:updateTimer.Stop(); $script:updateTimer = $null }
+    if ($KeepOthers) {
+        $script:vncEngine = $null
+    } else {
+        if ($null -ne $script:vncEngine) { $script:vncEngine.Disconnect(); $script:vncEngine = $null }
+        foreach ($k in @($script:activeSessions.Keys)) { $script:activeSessions[$k].Disconnect() }
         $script:activeSessions.Clear()
     }
-    $script:activeSessionKey=$null; $script:writeableBmp=$null; $script:lastFrameVer=-1; $vncImage.Source=$null
-    if($script:fitMode -and -not $script:isFullScreen){ Remove-FitMode; $script:fitMode=$false; $btnFitWindow.Content="Fit Window" }
-    if($script:isFullScreen){ Exit-FullScreen }
-    Set-Connected $false; $noConnectionOverlay.Visibility=[System.Windows.Visibility]::Visible
+    $script:activeSessionKey = $null
+    $script:writeableBmp     = $null
+    $script:lastFrameVer     = -1
+    $vncImage.Source         = $null
+    if ($script:fitMode -and -not $script:isFullScreen) { Remove-FitMode; $script:fitMode = $false; $btnFitWindow.Content = "Fit Window" }
+    if ($script:isFullScreen) { Exit-FullScreen }
+    Set-Connected $false
+    $noConnectionOverlay.Visibility = [System.Windows.Visibility]::Visible
     Update-SessionPanel
 }
-function Get-ScaledPos($e){
-    $pos=$e.GetPosition($vncImage); $x=[int]$pos.X; $y=[int]$pos.Y
-    if($script:fitMode -and $null -ne $script:vncEngine){
-        $dw=$vncImage.ActualWidth; $dh=$vncImage.ActualHeight
-        $fw=$script:vncEngine.FramebufferWidth; $fh=$script:vncEngine.FramebufferHeight
-        if($dw -gt 0 -and $dh -gt 0 -and $fw -gt 0 -and $fh -gt 0){
-            $scale=[Math]::Min($dw/$fw,$dh/$fh)
-            $x=[int](($pos.X-($dw-$fw*$scale)/2)/$scale); $y=[int](($pos.Y-($dh-$fh*$scale)/2)/$scale)
+
+function Get-ScaledPos($e) {
+    $pos = $e.GetPosition($vncImage)
+    $x   = [int]$pos.X; $y = [int]$pos.Y
+    if ($script:fitMode -and $null -ne $script:vncEngine) {
+        $dw = $vncImage.ActualWidth;  $dh = $vncImage.ActualHeight
+        $fw = $script:vncEngine.FramebufferWidth; $fh = $script:vncEngine.FramebufferHeight
+        if ($dw -gt 0 -and $dh -gt 0 -and $fw -gt 0 -and $fh -gt 0) {
+            $scale = [Math]::Min($dw / $fw, $dh / $fh)
+            $x = [int](($pos.X - ($dw - $fw * $scale) / 2) / $scale)
+            $y = [int](($pos.Y - ($dh - $fh * $scale) / 2) / $scale)
         }
     }
-    if($null -ne $script:vncEngine){ $x=[Math]::Max(0,[Math]::Min($x,$script:vncEngine.FramebufferWidth-1)); $y=[Math]::Max(0,[Math]::Min($y,$script:vncEngine.FramebufferHeight-1)) }
-    return @{X=$x;Y=$y}
+    if ($null -ne $script:vncEngine) {
+        $x = [Math]::Max(0, [Math]::Min($x, $script:vncEngine.FramebufferWidth  - 1))
+        $y = [Math]::Max(0, [Math]::Min($y, $script:vncEngine.FramebufferHeight - 1))
+    }
+    return @{ X = $x; Y = $y }
 }
 
 # ============================================================
 # CONNECT (async via runspace)
 # ============================================================
-function Do-Connect{
-    if($null -ne $script:connectAsyncHandle -and -not $script:connectAsyncHandle.IsCompleted){return}
-    $h=$txtHost.Text.Trim()
-    if(-not($txtPort.Text.Trim() -match '^\d+$')){ Show-DarkMessageDialog "Invalid Input" "Enter a valid numeric port."; return }
-    $p=[int]$txtPort.Text.Trim()
-    if([string]::IsNullOrEmpty($h)){ Show-DarkMessageDialog "Invalid Input" "Enter a host."; return }
-    $pw=$(if($script:pwVisible){$txtPasswordVisible.Text}else{$txtPassword.Password})
-    $sk="${h}:${p}"
+function Do-Connect {
+    if ($null -ne $script:connectAsyncHandle -and -not $script:connectAsyncHandle.IsCompleted) { return }
 
-    # Save to recent hosts / passwords
+    $h = $txtHost.Text.Trim()
+    if ([string]::IsNullOrWhiteSpace($h)) { Show-DarkMessageDialog "Invalid Input" "Enter a host."; return }
+    if ($txtHost.Text -ne $h) { Show-DarkMessageDialog "Invalid Input" "Hostnames cannot contain leading or trailing spaces."; return }
+
+    $isValid = ($h -match '^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$') -or
+               ($h -match '^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$') -or
+               ($h -match '^(?=.{1,255}$)[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$')
+    if (-not $isValid) { Show-DarkMessageDialog "Invalid Input" "Enter a valid hostname or IP address."; return }
+
+    if (-not ($txtPort.Text.Trim() -match '^\d+$')) { Show-DarkMessageDialog "Invalid Input" "Enter a valid numeric port."; return }
+    $p  = [int]$txtPort.Text.Trim()
+    $pw = Get-Password
+    $sk = "${h}:${p}"
+
     Add-ToRecentHosts $h
-    if($pw){ Add-ToRecentPasswords $pw }
+    if ($pw) { Add-ToRecentPasswords $pw }
     Save-ConfigIni
 
-    if($script:activeSessions.ContainsKey($sk)){
-        if($script:activeSessions[$sk].IsConnected){ Switch-ToSession $sk; return }
-        else{ $script:activeSessions[$sk].Disconnect(); $script:activeSessions.Remove($sk) }
+    if ($script:activeSessions.ContainsKey($sk)) {
+        if ($script:activeSessions[$sk].IsConnected) { Switch-ToSession $sk; return }
+        else { $script:activeSessions[$sk].Disconnect(); $script:activeSessions.Remove($sk) }
     }
-    if($null -ne $script:updateTimer){ $script:updateTimer.Stop(); $script:updateTimer=$null }
-    $script:writeableBmp=$null; $script:lastFrameVer=-1; $vncImage.Source=$null
 
-    $txtStatus.Text="Connecting to ${h}:${p} ..."; $window.Cursor=[System.Windows.Input.Cursors]::Wait
-    $btnConnect.Visibility=[System.Windows.Visibility]::Collapsed
-    $btnDisconnect.Visibility=[System.Windows.Visibility]::Visible
-    $btnDisconnect.Content="Cancel"
-    $statusDot.Fill=(B 0xEE 0xD4 0x9F)
+    if ($null -ne $script:updateTimer) { $script:updateTimer.Stop(); $script:updateTimer = $null }
+    $script:writeableBmp = $null; $script:lastFrameVer = -1; $vncImage.Source = $null
 
-    $shared=$script:vncSettings.SharedConnection; $viewOnly=$script:vncSettings.ViewOnly; $clipSync=$script:vncSettings.ClipboardSync
-    $ne=New-Object VncEngine
-    $script:pendingConnect=$ne; $script:pendingConnectKey=$sk; $script:pendingConnectHost=$h
-    $script:pendingConnectPort=$p; $script:pendingConnectPw=$pw; $script:connectCancelled=$false
+    $txtStatus.Text        = "Connecting to ${h}:${p} ..."
+    $window.Cursor         = [System.Windows.Input.Cursors]::Wait
+    $btnConnect.Visibility = [System.Windows.Visibility]::Collapsed
+    $btnDisconnect.Visibility = [System.Windows.Visibility]::Visible
+    $btnDisconnect.Content = "Cancel"
+    $statusDot.Fill        = B 0xEE 0xD4 0x9F
 
-    $script:connectRunspace=[System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace(); $script:connectRunspace.Open()
-    $script:connectBgPS=[System.Management.Automation.PowerShell]::Create(); $script:connectBgPS.Runspace=$script:connectRunspace
-    [void]$script:connectBgPS.AddScript('param($e,$h,$p,$pw,$sh,$vo,$cs) return $e.Connect($h,$p,$pw,$sh,$vo,$cs)')
-    [void]$script:connectBgPS.AddArgument($ne); [void]$script:connectBgPS.AddArgument($h)
-    [void]$script:connectBgPS.AddArgument($p); [void]$script:connectBgPS.AddArgument($pw)
-    [void]$script:connectBgPS.AddArgument($shared); [void]$script:connectBgPS.AddArgument($viewOnly)
-    [void]$script:connectBgPS.AddArgument($clipSync)
-    try{ $script:connectAsyncHandle=$script:connectBgPS.BeginInvoke() }
-    catch{
+    $shared   = $script:vncSettings.SharedConnection
+    $viewOnly = $script:vncSettings.ViewOnly
+    $clipSync = $script:vncSettings.ClipboardSync
+    $ne       = New-Object VncEngine
+
+    $script:pendingConnect      = $ne
+    $script:pendingConnectKey   = $sk
+    $script:pendingConnectHost  = $h
+    $script:pendingConnectPort  = $p
+    $script:pendingConnectPw    = $pw
+    $script:connectCancelled    = $false
+
+    $script:connectRunspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+    $script:connectRunspace.Open()
+    $script:connectBgPS = [System.Management.Automation.PowerShell]::Create()
+    $script:connectBgPS.Runspace = $script:connectRunspace
+    $script:connectBgPS.AddScript('param($e,$h,$p,$pw,$sh,$vo,$cs) return $e.Connect($h,$p,$pw,$sh,$vo,$cs)') | Out-Null
+    $script:connectBgPS.AddArgument($ne)       | Out-Null
+    $script:connectBgPS.AddArgument($h)        | Out-Null
+    $script:connectBgPS.AddArgument($p)        | Out-Null
+    $script:connectBgPS.AddArgument($pw)       | Out-Null
+    $script:connectBgPS.AddArgument($shared)   | Out-Null
+    $script:connectBgPS.AddArgument($viewOnly) | Out-Null
+    $script:connectBgPS.AddArgument($clipSync) | Out-Null
+
+    try { $script:connectAsyncHandle = $script:connectBgPS.BeginInvoke() }
+    catch {
         Complete-PendingConnect
         Show-DarkMessageDialog "Connection Error" "Failed to start connection:`n$($_.Exception.Message)"
         return
     }
-    if($null -ne $script:connectPollTimer){ $script:connectPollTimer.Stop() }
-    $script:connectPollTimer=New-Object System.Windows.Threading.DispatcherTimer
-    $script:connectPollTimer.Interval=[TimeSpan]::FromMilliseconds(100)
+
+    if ($null -ne $script:connectPollTimer) { $script:connectPollTimer.Stop() }
+    $script:connectPollTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:connectPollTimer.Interval = [TimeSpan]::FromMilliseconds(100)
     $script:connectPollTimer.Add_Tick({ Complete-PendingConnect -IfDone })
     $script:connectPollTimer.Start()
 }
-function Complete-PendingConnect{
+
+function Complete-PendingConnect {
     param([switch]$IfDone)
-    if($null -eq $script:connectAsyncHandle){return}
-    if($IfDone -and -not $script:connectAsyncHandle.IsCompleted){return}
-    $script:connectPollTimer.Stop(); $window.Cursor=$null
-    $ne=$script:pendingConnect; $sk=$script:pendingConnectKey; $h=$script:pendingConnectHost
-    $p=$script:pendingConnectPort; $pw=$script:pendingConnectPw
-    $ok=$false
-    try{ $result=$script:connectBgPS.EndInvoke($script:connectAsyncHandle); if($result -and $result.Count -gt 0){ $ok=[bool]$result[0] } }catch{ $ok=$false }
-    try{ $script:connectBgPS.Dispose() }catch{}
-    try{ $script:connectRunspace.Close() }catch{}
-    try{ $script:connectRunspace.Dispose() }catch{}
-    $script:connectAsyncHandle=$null; $script:connectBgPS=$null; $script:connectRunspace=$null
-    $btnDisconnect.Content="Disconnect"
-    if($script:connectCancelled){
-        if($null -ne $ne){ $ne.Disconnect() }
-        $btnConnect.Visibility=[System.Windows.Visibility]::Visible
-        $btnDisconnect.Visibility=[System.Windows.Visibility]::Collapsed
-        $statusDot.Fill=(B 0xED 0x87 0x96); $txtStatus.Text="Cancelled"
-        $script:pendingConnect=$null; return
+    if ($null -eq $script:connectAsyncHandle) { return }
+    if ($IfDone -and -not $script:connectAsyncHandle.IsCompleted) { return }
+
+    $script:connectPollTimer.Stop()
+    $window.Cursor = $null
+    $ne  = $script:pendingConnect
+    $sk  = $script:pendingConnectKey
+    $h   = $script:pendingConnectHost
+    $p   = $script:pendingConnectPort
+    $pw  = $script:pendingConnectPw
+    $ok  = $false
+
+    try { $result = $script:connectBgPS.EndInvoke($script:connectAsyncHandle); if ($result -and $result.Count -gt 0) { $ok = [bool]$result[0] } } catch { $ok = $false }
+    try { $script:connectBgPS.Dispose() }   catch {}
+    try { $script:connectRunspace.Close() } catch {}
+    try { $script:connectRunspace.Dispose() } catch {}
+
+    $script:connectAsyncHandle = $null
+    $script:connectBgPS        = $null
+    $script:connectRunspace    = $null
+    $btnDisconnect.Content     = "Disconnect"
+
+    if ($script:connectCancelled) {
+        if ($null -ne $ne) { $ne.Disconnect() }
+        $btnConnect.Visibility    = [System.Windows.Visibility]::Visible
+        $btnDisconnect.Visibility = [System.Windows.Visibility]::Collapsed
+        $statusDot.Fill           = B 0xED 0x87 0x96
+        $txtStatus.Text           = "Cancelled"
+        $script:pendingConnect    = $null
+        return
     }
-    if($ok){
-        $fw=$ne.FramebufferWidth; $fh=$ne.FramebufferHeight; $name=$ne.DesktopName
-        $script:vncEngine=$ne; $script:activeSessionKey=$sk; $script:activeSessions[$sk]=$ne
+
+    if ($ok) {
+        $fw = $ne.FramebufferWidth; $fh = $ne.FramebufferHeight
+        $script:vncEngine        = $ne
+        $script:activeSessionKey = $sk
+        $script:activeSessions[$sk] = $ne
         Add-ToHistory -H $h -P $p -PW $pw
-        $entry=Find-HistoryEntry $sk; $dn=$(if($null -ne $entry){Get-SessionDisplayName $entry}else{$sk})
-        if($script:fitMode){ Apply-FitMode } else { $vncCanvas.Width=$fw; $vncCanvas.Height=$fh }
-        Set-Connected $true; $txtStatus.Text="Connected - $dn"; $txtResolution.Text="${fw} x ${fh}"
-        $vncCanvas.Focus()
-        $script:updateTimer=New-Object System.Windows.Threading.DispatcherTimer
-        $script:updateTimer.Interval=[TimeSpan]::FromMilliseconds($script:vncSettings.RefreshRate)
-        $script:updateTimer.Add_Tick({ Update-Frame }); $script:updateTimer.Start()
+        $entry = Find-HistoryEntry $sk
+        $dn    = if ($null -ne $entry) { Get-SessionDisplayName $entry } else { $sk }
+        if ($script:fitMode) { Apply-FitMode } else { $vncCanvas.Width = $fw; $vncCanvas.Height = $fh }
+        Set-Connected $true; $txtStatus.Text = "Connected - $dn"; $txtResolution.Text = "${fw} x ${fh}"; $vncCanvas.Focus()
+        $script:updateTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:updateTimer.Interval = [TimeSpan]::FromMilliseconds($script:vncSettings.RefreshRate)
+        $script:updateTimer.Add_Tick({ Update-Frame })
+        $script:updateTimer.Start()
         Update-SessionPanel
     } else {
-        $err=if($null -ne $ne){$ne.LastError}else{"Unknown error"}
-        if($null -ne $ne){ $ne.Disconnect() }
-        $btnConnect.Visibility=[System.Windows.Visibility]::Visible
-        $btnDisconnect.Visibility=[System.Windows.Visibility]::Collapsed
-        $statusDot.Fill=(B 0xED 0x87 0x96); $txtStatus.Text="Failed: $err"
-        if($null -ne $script:activeSessionKey -and $script:activeSessions.ContainsKey($script:activeSessionKey)){
+        $err = if ($null -ne $ne) { $ne.LastError } else { "Unknown error" }
+        if ($null -ne $ne) { $ne.Disconnect() }
+        $btnConnect.Visibility    = [System.Windows.Visibility]::Visible
+        $btnDisconnect.Visibility = [System.Windows.Visibility]::Collapsed
+        $statusDot.Fill           = B 0xED 0x87 0x96
+        $txtStatus.Text           = "Failed: $err"
+        if ($null -ne $script:activeSessionKey -and $script:activeSessions.ContainsKey($script:activeSessionKey)) {
             Switch-ToSession $script:activeSessionKey
-        } else { $noConnectionOverlay.Visibility=[System.Windows.Visibility]::Visible }
+        } else {
+            $noConnectionOverlay.Visibility = [System.Windows.Visibility]::Visible
+        }
         Show-DarkMessageDialog "Connection Failed" "Connection failed:`n$err"
     }
-    $script:pendingConnect=$null
+    $script:pendingConnect = $null
 }
-function Cancel-PendingConnect{
-    if($null -eq $script:connectAsyncHandle -or $script:connectAsyncHandle.IsCompleted){return $false}
-    $script:connectCancelled=$true
-    if($null -ne $script:pendingConnect){ try{ $script:pendingConnect.Disconnect() }catch{} }
+
+function Cancel-PendingConnect {
+    if ($null -eq $script:connectAsyncHandle -or $script:connectAsyncHandle.IsCompleted) { return $false }
+    $script:connectCancelled = $true
+    if ($null -ne $script:pendingConnect) { try { $script:pendingConnect.Disconnect() } catch {} }
     return $true
 }
 
 # ============================================================
 # CLIPBOARD SYNC
 # ============================================================
-function Sync-Clipboard{
-    if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}
-    if(-not $script:vncSettings.ClipboardSync){return}
-    if($script:vncEngine.HasNewServerClipboard){
-        $script:vncEngine.HasNewServerClipboard=$false; $srvTxt=$script:vncEngine.ServerClipboard
-        if($srvTxt){
-            try{
-                $curLocal=""
-                try{ if([System.Windows.Clipboard]::ContainsText()){ $curLocal=[System.Windows.Clipboard]::GetText() } }catch{}
-                if($curLocal -ne $srvTxt){ [System.Windows.Clipboard]::SetText($srvTxt); $script:lastLocalClipboard=$srvTxt }
-            }catch{}
+function Sync-Clipboard {
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    if (-not $script:vncSettings.ClipboardSync) { return }
+
+    if ($script:vncEngine.HasNewServerClipboard) {
+        $script:vncEngine.HasNewServerClipboard = $false
+        $srvTxt = $script:vncEngine.ServerClipboard
+        if ($srvTxt) {
+            try {
+                $curLocal = ""
+                try { if ([System.Windows.Clipboard]::ContainsText()) { $curLocal = [System.Windows.Clipboard]::GetText() } } catch {}
+                if ($curLocal -ne $srvTxt) { [System.Windows.Clipboard]::SetText($srvTxt); $script:lastLocalClipboard = $srvTxt }
+            } catch {}
         }
     }
-    try{
-        if([System.Windows.Clipboard]::ContainsText()){
-            $lt=[System.Windows.Clipboard]::GetText()
-            if($lt -and $lt -ne $script:lastLocalClipboard){ $script:lastLocalClipboard=$lt; $script:vncEngine.SendClientCutText($lt) }
+
+    try {
+        if ([System.Windows.Clipboard]::ContainsText()) {
+            $lt = [System.Windows.Clipboard]::GetText()
+            if ($lt -and $lt -ne $script:lastLocalClipboard) { $script:lastLocalClipboard = $lt; $script:vncEngine.SendClientCutText($lt) }
         }
-    }catch{}
+    } catch {}
 }
 
 # ============================================================
 # LOAD
 # ============================================================
-Load-ConfigIni
-Load-SessionHistory; Load-VncSettings
-# Apply persisted panel width and window size
-$sidePanelCol.Width=New-Object System.Windows.GridLength($script:panelWidth)
-$window.Width=$script:windowWidth
-$window.Height=$script:windowHeight
-# Apply persisted password visibility
-if($script:showPassword){
-    $txtPassword.Visibility=[System.Windows.Visibility]::Collapsed
-    $txtPasswordVisible.Visibility=[System.Windows.Visibility]::Visible
-    $btnTogglePw.Background=(B 0xC6 0xA0 0xF6); $btnTogglePw.Foreground=(B 0x18 0x19 0x26)
-    $script:pwVisible=$true
+Load-ConfigIni; Load-SessionHistory; Load-VncSettings
+$sidePanelCol.Width = New-Object System.Windows.GridLength($script:panelWidth)
+$window.Width       = $script:windowWidth
+$window.Height      = $script:windowHeight
+
+if ($script:showPassword) {
+    $txtPassword.Visibility        = [System.Windows.Visibility]::Collapsed
+    $txtPasswordVisible.Visibility = [System.Windows.Visibility]::Visible
+    $btnTogglePw.Background        = B 0xC6 0xA0 0xF6
+    $btnTogglePw.Foreground        = B 0x18 0x19 0x26
+    $script:pwVisible              = $true
 }
 Update-SessionPanel
 
@@ -1478,166 +1930,263 @@ Update-SessionPanel
 # EVENT HANDLERS
 # ============================================================
 $btnConnect.Add_Click({ Do-Connect })
+
 $btnDisconnect.Add_Click({
-    if(Cancel-PendingConnect){return}
-    if($null -ne $script:activeSessionKey){ Disconnect-Session $script:activeSessionKey } else { Stop-VncSession }
+    if (Cancel-PendingConnect) { return }
+    if ($null -ne $script:activeSessionKey) { Disconnect-Session $script:activeSessionKey } else { Stop-VncSession }
 })
-$btnFitWindow.Add_Click({ if($null -eq $script:vncEngine){return}; $script:fitMode=-not $script:fitMode; if($script:fitMode){ $btnFitWindow.Content="1:1 Mode"; Apply-FitMode } else { $btnFitWindow.Content="Fit Window"; Remove-FitMode }; $vncCanvas.Focus() })
-$btnFullScreen.Add_Click({ if($script:isFullScreen){ Exit-FullScreen } else { Enter-FullScreen }; $vncCanvas.Focus() })
+
+$btnFitWindow.Add_Click({
+    if ($null -eq $script:vncEngine) { return }
+    $script:fitMode = -not $script:fitMode
+    if ($script:fitMode) { $btnFitWindow.Content = "1:1 Mode"; Apply-FitMode } else { $btnFitWindow.Content = "Fit Window"; Remove-FitMode }
+    $vncCanvas.Focus()
+})
+
+$btnFullScreen.Add_Click({ if ($script:isFullScreen) { Exit-FullScreen } else { Enter-FullScreen }; $vncCanvas.Focus() })
 $btnClipboard.Add_Click({ Show-ClipboardDialog })
 $btnSettings.Add_Click({ Show-SettingsDialog })
 $btnTogglePanel.Add_Click({ Toggle-SidePanel })
 $btnClearHistory.Add_Click({ $script:recentSessions.Clear(); Save-SessionHistory; Update-SessionPanel })
 
-# Paste host from clipboard
 $btnPasteHost.Add_Click({
-    try{
-        if([System.Windows.Clipboard]::ContainsText()){
-            $clipText=[System.Windows.Clipboard]::GetText().Trim()
-            if($clipText){ $txtHost.Text=$clipText; $txtHost.Focus(); $txtHost.SelectAll() }
+    try {
+        if ([System.Windows.Clipboard]::ContainsText()) {
+            $clipText = [System.Windows.Clipboard]::GetText().Trim()
+            if ($clipText) { $txtHost.Text = $clipText; $txtHost.Focus(); $txtHost.SelectAll() }
         }
-    }catch{}
+    } catch {}
 })
 
-# Recent hosts dropdown
 $btnHostHistory.Add_Click({ Show-HostHistoryDropdown })
-
-# Recent passwords dropdown
 $btnPwHistory.Add_Click({ Show-PwHistoryDropdown })
 
-# Track Window size changes
+# Hostname input restrictions
+$txtHost.Add_PreviewTextInput({
+    param($s, $e)
+    $e.Handled = $e.Text -notmatch '^[a-zA-Z0-9\.\-:]$'
+})
+$txtHost.Add_PreviewKeyDown({
+    param($s, $e)
+    if ($e.Key -eq [System.Windows.Input.Key]::Space) { $e.Handled = $true }
+})
+
+[System.Windows.DataObject]::AddPastingHandler($txtHost, [System.Windows.DataObjectPastingEventHandler]{
+    param($s, $e)
+    if ($e.DataObject.GetDataPresent([System.Windows.DataFormats]::Text)) {
+        $text    = [string]$e.DataObject.GetData([System.Windows.DataFormats]::Text)
+        $cleaned = $text -replace '[^a-zA-Z0-9\.\-:]', ''
+        if ($cleaned -ne $text) {
+            $e.CancelCommand()
+            if (-not [string]::IsNullOrEmpty($cleaned)) {
+                $txtHost.SelectedText  = $cleaned
+                $txtHost.CaretIndex    = $txtHost.SelectionStart + $cleaned.Length
+                $txtHost.SelectionLength = 0
+            }
+        }
+    } else { $e.CancelCommand() }
+})
+
 $window.Add_SizeChanged({
     if ($window.WindowState -eq [System.Windows.WindowState]::Normal) {
-        $script:windowWidth = [int]$window.ActualWidth
+        $script:windowWidth  = [int]$window.ActualWidth
         $script:windowHeight = [int]$window.ActualHeight
     }
 })
 
-# Persist panel width when splitter drag completes
 $panelSplitter.Add_DragCompleted({
-    try{
-        $w=[int]$sidePanelCol.ActualWidth
-        if($w -ge 160 -and $w -le 600){ $script:panelWidth=$w; Save-ConfigIni }
-    }catch{}
+    try { $w = [int]$sidePanelCol.ActualWidth; if ($w -ge 160 -and $w -le 600) { $script:panelWidth = $w; Save-ConfigIni } } catch {}
 })
-# Also persist on double-click reset (DragDelta covers preview drag, but ActualWidth updates on release)
 $panelSplitter.Add_DragDelta({
-    try{
-        $w=[int]$sidePanelCol.ActualWidth
-        if($w -ge 160 -and $w -le 600){ $script:panelWidth=$w }
-    }catch{}
+    try { $w = [int]$sidePanelCol.ActualWidth; if ($w -ge 160 -and $w -le 600) { $script:panelWidth = $w } } catch {}
 })
 
-# Password visibility toggle (persists to INI so it stays shown/hidden across launches)
 $btnTogglePw.Add_Click({
-    if(-not $script:pwVisible){
-        $script:syncingPw=$true; $txtPasswordVisible.Text=$txtPassword.Password; $script:syncingPw=$false
-        $txtPassword.Visibility=[System.Windows.Visibility]::Collapsed; $txtPasswordVisible.Visibility=[System.Windows.Visibility]::Visible
-        $btnTogglePw.Background=(B 0xC6 0xA0 0xF6); $btnTogglePw.Foreground=(B 0x18 0x19 0x26)
-        $script:pwVisible=$true; $script:showPassword=$true; Save-ConfigIni; $txtPasswordVisible.Focus(); $txtPasswordVisible.SelectAll()
+    if (-not $script:pwVisible) {
+        $script:syncingPw              = $true
+        $txtPasswordVisible.Text       = $txtPassword.Password
+        $script:syncingPw              = $false
+        $txtPassword.Visibility        = [System.Windows.Visibility]::Collapsed
+        $txtPasswordVisible.Visibility = [System.Windows.Visibility]::Visible
+        $btnTogglePw.Background        = B 0xC6 0xA0 0xF6
+        $btnTogglePw.Foreground        = B 0x18 0x19 0x26
+        $script:pwVisible              = $true
+        $script:showPassword           = $true
+        Save-ConfigIni
+        $txtPasswordVisible.Focus(); $txtPasswordVisible.SelectAll()
     } else {
-        $script:syncingPw=$true; $txtPassword.Password=$txtPasswordVisible.Text; $script:syncingPw=$false
-        $txtPassword.Visibility=[System.Windows.Visibility]::Visible; $txtPasswordVisible.Visibility=[System.Windows.Visibility]::Collapsed
-        $btnTogglePw.Background=(B 0x1E 0x20 0x30); $btnTogglePw.Foreground=(B 0xB8 0xC0 0xE0)
-        $script:pwVisible=$false; $script:showPassword=$false; Save-ConfigIni; $txtPassword.Focus()
+        $script:syncingPw              = $true
+        $txtPassword.Password          = $txtPasswordVisible.Text
+        $script:syncingPw              = $false
+        $txtPassword.Visibility        = [System.Windows.Visibility]::Visible
+        $txtPasswordVisible.Visibility = [System.Windows.Visibility]::Collapsed
+        $btnTogglePw.Background        = B 0x1E 0x20 0x30
+        $btnTogglePw.Foreground        = B 0xB8 0xC0 0xE0
+        $script:pwVisible              = $false
+        $script:showPassword           = $false
+        Save-ConfigIni
+        $txtPassword.Focus()
     }
 })
-$txtPassword.Add_PasswordChanged({ if($script:syncingPw){return}; $script:syncingPw=$true; $txtPasswordVisible.Text=$txtPassword.Password; $script:syncingPw=$false })
-$txtPasswordVisible.Add_TextChanged({ if($script:syncingPw){return}; $script:syncingPw=$true; $txtPassword.Password=$txtPasswordVisible.Text; $script:syncingPw=$false })
 
-# Enter triggers connect
-$onEnter={ param($s,$e); if($e.Key -eq [System.Windows.Input.Key]::Return -and $btnConnect.Visibility -eq [System.Windows.Visibility]::Visible){ Do-Connect; $e.Handled=$true } }
+$txtPassword.Add_PasswordChanged({
+    if ($script:syncingPw) { return }
+    $script:syncingPw = $true; $txtPasswordVisible.Text = $txtPassword.Password; $script:syncingPw = $false
+})
+$txtPasswordVisible.Add_TextChanged({
+    if ($script:syncingPw) { return }
+    $script:syncingPw = $true; $txtPassword.Password = $txtPasswordVisible.Text; $script:syncingPw = $false
+})
+
+$onEnter = {
+    param($s, $e)
+    if ($e.Key -eq [System.Windows.Input.Key]::Return -and $btnConnect.Visibility -eq [System.Windows.Visibility]::Visible) {
+        Do-Connect; $e.Handled = $true
+    }
+}
 $txtHost.Add_KeyDown($onEnter); $txtPort.Add_KeyDown($onEnter)
 $txtPassword.Add_KeyDown($onEnter); $txtPasswordVisible.Add_KeyDown($onEnter)
 
-# Fullscreen bar
 $btnFsWindowed.Add_Click({ Exit-FullScreen; $vncCanvas.Focus() })
 $btnFsClipboard.Add_Click({ Show-ClipboardDialog })
-$btnFsDisconnect.Add_Click({ if($null -ne $script:activeSessionKey){ Disconnect-Session $script:activeSessionKey } else { Stop-VncSession }; $vncCanvas.Focus() })
-$fsHoverZone.Add_MouseEnter({ if($script:isFullScreen){ Show-FullscreenBar } })
-$fullscreenBar.Add_MouseEnter({ if($null -ne $script:fsBarTimer){ $script:fsBarTimer.Stop() } })
+$btnFsDisconnect.Add_Click({
+    if ($null -ne $script:activeSessionKey) { Disconnect-Session $script:activeSessionKey } else { Stop-VncSession }
+    $vncCanvas.Focus()
+})
+
+$fsHoverZone.Add_MouseEnter({ if ($script:isFullScreen) { Show-FullscreenBar } })
+$fullscreenBar.Add_MouseEnter({ if ($null -ne $script:fsBarTimer) { $script:fsBarTimer.Stop() } })
 $fullscreenBar.Add_MouseLeave({
-    if($script:isFullScreen -and $script:fsBarVisible){
-        if($null -ne $script:fsBarTimer){ $script:fsBarTimer.Stop() }
-        $script:fsBarTimer=New-Object System.Windows.Threading.DispatcherTimer; $script:fsBarTimer.Interval=[TimeSpan]::FromSeconds(1.5)
-        $script:fsBarTimer.Add_Tick({ $script:fsBarTimer.Stop(); Hide-FullscreenBar }); $script:fsBarTimer.Start()
+    if ($script:isFullScreen -and $script:fsBarVisible) {
+        if ($null -ne $script:fsBarTimer) { $script:fsBarTimer.Stop() }
+        $script:fsBarTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:fsBarTimer.Interval = [TimeSpan]::FromSeconds(1.5)
+        $script:fsBarTimer.Add_Tick({ $script:fsBarTimer.Stop(); Hide-FullscreenBar })
+        $script:fsBarTimer.Start()
     }
 })
-$window.Add_PreviewMouseMove({ param($s,$e); if(-not $script:isFullScreen){return}; $pos=$e.GetPosition($window); if($pos.Y -le 8){ $wc=$window.ActualWidth/2; if([Math]::Abs($pos.X-$wc) -lt 200){ Show-FullscreenBar } } })
-$window.Add_PreviewKeyDown({ param($s,$e); if($script:isFullScreen -and $e.Key -eq [System.Windows.Input.Key]::Escape){ Exit-FullScreen; $e.Handled=$true } })
 
-# Mouse
-$vncCanvas.Add_MouseMove({ param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}; $p=Get-ScaledPos $e; $script:vncEngine.SendPointer($script:buttonMask,$p.X,$p.Y) })
+$window.Add_PreviewMouseMove({
+    param($s, $e)
+    if (-not $script:isFullScreen) { return }
+    $pos = $e.GetPosition($window)
+    if ($pos.Y -le 8 -and [Math]::Abs($pos.X - $window.ActualWidth / 2) -lt 200) { Show-FullscreenBar }
+})
+
+$window.Add_PreviewKeyDown({
+    param($s, $e)
+    if ($script:isFullScreen -and $e.Key -eq [System.Windows.Input.Key]::Escape) { Exit-FullScreen; $e.Handled = $true }
+})
+
+$vncCanvas.Add_MouseMove({
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    $p = Get-ScaledPos $e; $script:vncEngine.SendPointer($script:buttonMask, $p.X, $p.Y)
+})
+
 $vncCanvas.Add_MouseDown({
-    param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}
-    $s.Focus()|Out-Null
-    switch($e.ChangedButton){
-        ([System.Windows.Input.MouseButton]::Left){$script:buttonMask=$script:buttonMask -bor 1}
-        ([System.Windows.Input.MouseButton]::Middle){$script:buttonMask=$script:buttonMask -bor 2}
-        ([System.Windows.Input.MouseButton]::Right){$script:buttonMask=$script:buttonMask -bor 4}
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    $s.Focus() | Out-Null
+    switch ($e.ChangedButton) {
+        ([System.Windows.Input.MouseButton]::Left)   { $script:buttonMask = $script:buttonMask -bor 1 }
+        ([System.Windows.Input.MouseButton]::Middle) { $script:buttonMask = $script:buttonMask -bor 2 }
+        ([System.Windows.Input.MouseButton]::Right)  { $script:buttonMask = $script:buttonMask -bor 4 }
     }
-    $p=Get-ScaledPos $e; $script:vncEngine.SendPointer($script:buttonMask,$p.X,$p.Y); $s.CaptureMouse(); $e.Handled=$true
+    $p = Get-ScaledPos $e; $script:vncEngine.SendPointer($script:buttonMask, $p.X, $p.Y)
+    $s.CaptureMouse(); $e.Handled = $true
 })
-$vncCanvas.Add_MouseUp({
-    param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}
-    switch($e.ChangedButton){
-        ([System.Windows.Input.MouseButton]::Left){$script:buttonMask=$script:buttonMask -band (-bnot 1)}
-        ([System.Windows.Input.MouseButton]::Middle){$script:buttonMask=$script:buttonMask -band (-bnot 2)}
-        ([System.Windows.Input.MouseButton]::Right){$script:buttonMask=$script:buttonMask -band (-bnot 4)}
-    }
-    $p=Get-ScaledPos $e; $script:vncEngine.SendPointer($script:buttonMask,$p.X,$p.Y); $s.ReleaseMouseCapture(); $e.Handled=$true
-})
-$vncCanvas.Add_MouseWheel({ param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}; $p=Get-ScaledPos $e; $sb=$(if($e.Delta -gt 0){8}else{16}); $script:vncEngine.SendPointer(($script:buttonMask -bor $sb),$p.X,$p.Y); $script:vncEngine.SendPointer($script:buttonMask,$p.X,$p.Y); $e.Handled=$true })
 
-# Keyboard
-$vncCanvas.Add_PreviewKeyDown({ param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}; $key=$(if($e.Key -eq [System.Windows.Input.Key]::System){$e.SystemKey}else{$e.Key}); $shift=(([System.Windows.Input.Keyboard]::Modifiers) -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0; $ks=[KeysymMap]::GetKeysym($key,$shift); if($ks -ne 0){ $script:vncEngine.SendKey($ks,$true); $e.Handled=$true } })
-$vncCanvas.Add_PreviewKeyUp({ param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}; $key=$(if($e.Key -eq [System.Windows.Input.Key]::System){$e.SystemKey}else{$e.Key}); $shift=(([System.Windows.Input.Keyboard]::Modifiers) -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0; $ks=[KeysymMap]::GetKeysym($key,$shift); if($ks -ne 0){ $script:vncEngine.SendKey($ks,$false); $e.Handled=$true } })
-$vncCanvas.Add_PreviewTextInput({ param($s,$e); if($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected){return}; foreach($ch in $e.Text.ToCharArray()){ $sym=[uint32][char]$ch; if($sym -gt 0 -and $sym -lt 0x100){ $script:vncEngine.SendKey($sym,$true); $script:vncEngine.SendKey($sym,$false) } }; $e.Handled=$true })
-$vncCanvas.Add_GotFocus({ $vncCanvas.Cursor=[System.Windows.Input.Cursors]::None })
-$vncCanvas.Add_LostFocus({ $vncCanvas.Cursor=$null })
+$vncCanvas.Add_MouseUp({
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    switch ($e.ChangedButton) {
+        ([System.Windows.Input.MouseButton]::Left)   { $script:buttonMask = $script:buttonMask -band (-bnot 1) }
+        ([System.Windows.Input.MouseButton]::Middle) { $script:buttonMask = $script:buttonMask -band (-bnot 2) }
+        ([System.Windows.Input.MouseButton]::Right)  { $script:buttonMask = $script:buttonMask -band (-bnot 4) }
+    }
+    $p = Get-ScaledPos $e; $script:vncEngine.SendPointer($script:buttonMask, $p.X, $p.Y)
+    $s.ReleaseMouseCapture(); $e.Handled = $true
+})
+
+$vncCanvas.Add_MouseWheel({
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    $p  = Get-ScaledPos $e
+    $sb = if ($e.Delta -gt 0) { 8 } else { 16 }
+    $script:vncEngine.SendPointer(($script:buttonMask -bor $sb), $p.X, $p.Y)
+    $script:vncEngine.SendPointer($script:buttonMask, $p.X, $p.Y)
+    $e.Handled = $true
+})
+
+$vncCanvas.Add_PreviewKeyDown({
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    $key   = if ($e.Key -eq [System.Windows.Input.Key]::System) { $e.SystemKey } else { $e.Key }
+    $shift = (([System.Windows.Input.Keyboard]::Modifiers) -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0
+    $ks    = [KeysymMap]::GetKeysym($key, $shift)
+    if ($ks -ne 0) { $script:vncEngine.SendKey($ks, $true); $e.Handled = $true }
+})
+
+$vncCanvas.Add_PreviewKeyUp({
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    $key   = if ($e.Key -eq [System.Windows.Input.Key]::System) { $e.SystemKey } else { $e.Key }
+    $shift = (([System.Windows.Input.Keyboard]::Modifiers) -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0
+    $ks    = [KeysymMap]::GetKeysym($key, $shift)
+    if ($ks -ne 0) { $script:vncEngine.SendKey($ks, $false); $e.Handled = $true }
+})
+
+$vncCanvas.Add_PreviewTextInput({
+    param($s, $e)
+    if ($null -eq $script:vncEngine -or -not $script:vncEngine.IsConnected) { return }
+    foreach ($ch in $e.Text.ToCharArray()) {
+        $sym = [uint32][char]$ch
+        if ($sym -gt 0 -and $sym -lt 0x100) { $script:vncEngine.SendKey($sym, $true); $script:vncEngine.SendKey($sym, $false) }
+    }
+    $e.Handled = $true
+})
+
+$vncCanvas.Add_GotFocus({  $vncCanvas.Cursor = [System.Windows.Input.Cursors]::None })
+$vncCanvas.Add_LostFocus({ $vncCanvas.Cursor = $null })
 
 # ============================================================
 # TIMERS
 # ============================================================
-$script:statsTimer=New-Object System.Windows.Threading.DispatcherTimer; $script:statsTimer.Interval=[TimeSpan]::FromSeconds(1)
+$script:statsTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:statsTimer.Interval = [TimeSpan]::FromSeconds(1)
 $script:statsTimer.Add_Tick({
     Update-Stats
-    if($script:panelOpen){
-        $dead=@()
-        foreach($k in @($script:activeSessions.Keys)){ if(-not $script:activeSessions[$k].IsConnected){ $dead+=$k } }
-        if($dead.Count -gt 0){ foreach($dk in $dead){ $script:activeSessions[$dk].Disconnect(); $script:activeSessions.Remove($dk) }; Update-SessionPanel }
-    }
+    if ($script:panelOpen) { Purge-DeadSessions }
 })
 $script:statsTimer.Start()
 
-$script:clipTimer=New-Object System.Windows.Threading.DispatcherTimer; $script:clipTimer.Interval=[TimeSpan]::FromMilliseconds(250)
+$script:clipTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:clipTimer.Interval = [TimeSpan]::FromMilliseconds(250)
 $script:clipTimer.Add_Tick({ Sync-Clipboard })
 $script:clipTimer.Start()
 
 $window.Add_Closing({
-    if($null -ne $script:statsTimer){ $script:statsTimer.Stop() }
-    if($null -ne $script:clipTimer){ $script:clipTimer.Stop() }
-    if($null -ne $script:fsBarTimer){ $script:fsBarTimer.Stop() }
-    if($null -ne $script:connectPollTimer){ $script:connectPollTimer.Stop() }
-    if($null -ne $script:connectAsyncHandle -and -not $script:connectAsyncHandle.IsCompleted){
-        $script:connectCancelled=$true
-        if($null -ne $script:pendingConnect){ try{ $script:pendingConnect.Disconnect() }catch{} }
-        try{ if($null -ne $script:connectBgPS){ $script:connectBgPS.EndInvoke($script:connectAsyncHandle) } }catch{}
+    foreach ($t in @($script:statsTimer, $script:clipTimer, $script:fsBarTimer, $script:connectPollTimer)) {
+        if ($null -ne $t) { $t.Stop() }
     }
-    if($null -ne $script:connectBgPS){ try{ $script:connectBgPS.Dispose() }catch{} }
-    if($null -ne $script:connectRunspace){ try{ $script:connectRunspace.Close() }catch{}; try{ $script:connectRunspace.Dispose() }catch{} }
-
-    # Final panel width and window size save
-    try{
-        $w=[int]$sidePanelCol.ActualWidth
-        if($w -ge 160 -and $w -le 600){ $script:panelWidth=$w }
+    if ($null -ne $script:connectAsyncHandle -and -not $script:connectAsyncHandle.IsCompleted) {
+        $script:connectCancelled = $true
+        if ($null -ne $script:pendingConnect) { try { $script:pendingConnect.Disconnect() } catch {} }
+        try { if ($null -ne $script:connectBgPS) { $script:connectBgPS.EndInvoke($script:connectAsyncHandle) } } catch {}
+    }
+    if ($null -ne $script:connectBgPS)    { try { $script:connectBgPS.Dispose() }    catch {} }
+    if ($null -ne $script:connectRunspace) { try { $script:connectRunspace.Close(); $script:connectRunspace.Dispose() } catch {} }
+    try {
+        $w = [int]$sidePanelCol.ActualWidth
+        if ($w -ge 160 -and $w -le 600) { $script:panelWidth = $w }
         if ($window.WindowState -eq [System.Windows.WindowState]::Normal) {
-            $script:windowWidth = [int]$window.ActualWidth
+            $script:windowWidth  = [int]$window.ActualWidth
             $script:windowHeight = [int]$window.ActualHeight
         }
-    }catch{}
+    } catch {}
     Save-ConfigIni
     Stop-VncSession
 })
 
-$window.ShowDialog()|Out-Null
+$window.ShowDialog() | Out-Null
