@@ -2,7 +2,7 @@
 
 A standalone, lightweight, high-performance VNC client written entirely in **PowerShell 5.1**, **WPF/XAML**, and **inlined C#**. Designed with the dark **Catppuccin Macchiato** aesthetic, it delivers low-latency remote desktop streaming without relying on external third-party dependencies or heavy installation packages.
 
-<img width="60%" alt="image" src="https://github.com/user-attachments/assets/da07c390-7f2e-43b0-acdf-1aa834ed14c9" />
+<img width="60%" alt="2026-07-21_151836" src="https://github.com/user-attachments/assets/0cbdea9a-e819-4613-a904-ba668939de3a" />
 
 ---
 
