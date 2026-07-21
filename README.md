@@ -1,79 +1,67 @@
-# PowerShell VNC Suite
+# Interactive VNC Client GUI (PowerShell / WPF / C#)
 
-A 100% pure PowerShell and C# implementation of a VNC Client (Viewer) and VNC Server. Utilizing WPF for the user interface and native Windows APIs for screen capture and input injection, this suite requires no third-party executables, DLLs, or installation packages.
+A standalone, lightweight, high-performance VNC client written entirely in **PowerShell 5.1**, **WPF/XAML**, and **inlined C#**. Designed with the dark **Catppuccin Macchiato** aesthetic, it delivers low-latency remote desktop streaming without relying on external third-party dependencies or heavy installation packages.
 
 <img width="60%" alt="image" src="https://github.com/user-attachments/assets/da07c390-7f2e-43b0-acdf-1aa834ed14c9" />
 
+---
+
+## What It Is
+
+This tool is a self-contained PowerShell script that builds an interactive Graphical User Interface (GUI) over the **RFB 003.008 (Remote Framebuffer)** protocol. By combining PowerShell with directly compiled C# code (`Add-Type`), it bypasses the typical performance limitations of script-based viewers to provide high-frame-rate desktop rendering and responsive input handling.
 
 ---
 
-## What is it?
+## Why It Exists
 
-This project consists of two standalone PowerShell scripts:
+Standard remote management software often requires administrative privileges, heavy installer runtimes, or paid subscriptions. Many lightweight VNC tools lack modern visual interfaces, persistent multi-session tabs, or high-DPI scaling support. 
 
-* **VNC Viewer (`vnc-viewer.ps1`):** A fully interactive, WPF-based remote desktop client. It connects to any standard VNC server (including TightVNC, RealVNC, and our custom server) using the RFB 003.008 protocol.
-* **VNC Server (`vnc-server.ps1`):** A system tray application that hosts a VNC server, allowing remote inbound connections to view and control the host machine's screen, keyboard, and mouse.
-
----
-
-## Why it exists?
-
-Traditional VNC software requires heavy installation packages, often leaving behind background services, registry keys, and deep driver hooks. This suite exists to provide a completely portable, zero-installation remote desktop solution. 
-
-Because it is pure PowerShell, it can be:
-* Run directly from a USB drive.
-* Deployed instantly via RMM tools, SCCM, or Intune without packaging.
-* Audited easily by security teams (the C# code is embedded directly in the script).
-* Used in restricted environments where traditional `.exe` installations are blocked by AppLocker or WDAC policies.
+This project was created to provide a **portable, zero-dependency, single-script remote desktop client** for Windows environments. It bridges the gap between scriptability and native software performance—allowing IT administrators, security researchers, and power users to quickly initiate remote sessions on internal networks without installation overhead.
 
 ---
 
-## Who it's for?
+## Key Features
 
-* **System Administrators & Helpdesk:** Need quick, portable access to remote machines without installing agents.
-* **Security Professionals:** Require a transparent, scriptable remote access tool where the source code is readily available for audit.
-* **Developers:** Interested in how the RFB (Remote Frame Buffer) protocol, dirty-rectangle screen diffing, and asynchronous TCP networking work under the hood in .NET/C#.
-* **Power Users:** Want a lightweight, bloat-free alternative to commercial remote desktop software.
+### High-Performance Rendering & Input Engine
+* **60 FPS Capability:** Dynamic refresh logic targeting sub-16ms update intervals.
+* **Asynchronous Network I/O:** Threaded socket reads and writes prevent UI freezes during network spikes.
+* **Pointer Coalescing:** Eliminates cursor lag by collapsing mouse movement events prior to transmission over the wire.
+* **Zero-Latency Native Cursor:** Native OS cursor support avoids remote cursor rendering delays.
+* **Integrated C# Decoders:** Fast memory manipulation and direct buffer writes to WPF `WriteableBitmap` objects.
+
+### Modern UI & Session Management
+* **Catppuccin Macchiato Theme:** Clean dark-mode design with cohesive, high-contrast visual cues.
+* **Multi-Session Management:** Simultaneous tracking of active, pinned, and recent remote hosts via a resizable side panel.
+* **State Persistence:** Automatically saves window geometry, side-panel width, host history, password visibility settings, and session details to local INI/JSON configurations.
+* **Fast Pre-Flight Pings:** Quickly checks host reachability via ICMP before attempting socket handshakes.
+* **Flexible View Modes:** Supports 1:1 pixel rendering, proportional window fitting, and an immersive Full Screen overlay mode.
+
+### Workflow Utilities
+* **Bi-Directional Clipboard Synchronization:** Background clipboard monitoring alongside a manual keystroke-injection clipboard tool for tricky remote shells.
+* **Input Validation & Safety:** Enforces IP/hostname structure to prevent standard execution errors.
+* **Dynamic Password Masking:** In-line toggle for visible plain-text password verification or standard password masking.
 
 ---
 
-## Features
+## Target Audience
 
-### VNC Viewer Features
-* **Non-Blocking Async UI:** Connects to unreachable hosts on a background runspace without freezing the interface. Features a hard 8-second timeout and a "Cancel" button.
-* **Multi-Session Support:** Connect to multiple remote machines simultaneously and switch between them via an active session sidebar.
-* **Fit-to-Window & Fullscreen:** Scale the remote display to fit the window or enter borderless fullscreen mode with an auto-hiding toolbar.
-* **Session Management:** Saves connection history to JSON. Supports pinning, renaming, and per-session password saving.
-* **Clipboard Transfer:** Emulates keystrokes to securely paste complex clipboard data into the remote session.
-* **Live Statistics:** Real-time display of FPS, frame count, bandwidth usage, connection latency, and uptime.
-* **Password Visibility Toggle:** Show or hide the password input field on the fly.
+* **System Administrators & Engineers:** Who need a quick, safe, portable tool to connect to servers, headless machines, or embedded devices without installing new software.
+* **Security Professionals & Labs:** Operating in constrained or isolated Windows environments where third-party installers are restricted.
+* **Power Users:** Who want a clean, dark-themed VNC manager capable of handling multiple saved targets smoothly.
 
-### VNC Server Features
-* **System Tray Integration:** Runs silently in the background. No console window. Right-click the tray icon to Start/Stop the server, view connected clients, or exit.
-* **Dynamic Tray Icon:** Visually indicates server status (Green circle = Running, Grey circle = Stopped).
-* **RFB 003.008 Protocol:** Fully compliant with standard VNC clients. Supports VNC password authentication (DES challenge-response).
-* **Dirty-Rectangle Tracking:** Captures only the parts of the screen that have changed, drastically reducing bandwidth and CPU usage.
-* **Native Cursor Rendering:** Draws the local mouse cursor directly into the video frame, fixing the "invisible cursor" issue common with headless VMs (like VMware).
-* **DPI-Aware Multi-Monitor Capture:** Correctly captures all monitors regardless of Windows display scaling settings.
-* **Automatic Firewall Management:** Detects missing inbound firewall rules and attempts to create them automatically (falls back gracefully for non-admins).
-* **Rotating Logs:** Configurable log levels (Error, Warn, Info) and automatic log rotation to prevent disk bloat over long uptimes.
+---
+
+## Requirements
+
+* **OS:** Windows 7 / 8.1 / 10 / 11 or Windows Server 2012+
+* **PowerShell:** Version 5.1 or higher
+* **Framework:** .NET Framework 4.5+ (Standard on modern Windows installations)
+* **Target Protocol:** RFB 003.008 compliant VNC Servers (e.g., UltraVNC, TightVNC, RealVNC, x11vnc)
 
 ---
 
 ## Usage
 
-Ensure you are running PowerShell 5.1 or higher (PowerShell Core 7+ is also supported). 
-
-To start the Server:
-powershell.exe -ExecutionPolicy Bypass -File .\vnc-server.ps1 -Password "YourSecretPass"
-
-To launch the Viewer:
-powershell.exe -ExecutionPolicy Bypass -File .\vnc-viewer.ps1
-
----
-
-## Limitations & Notes
-
-> **Session 0 Isolation:** Like all standard VNC servers running as a background service, the server script cannot capture the interactive user desktop if run as a SYSTEM-level background service. For interactive desktop control, run the server script directly within the user's session.
-
-> **Windows Only:** Because the scripts rely on System.Windows.Forms, System.Drawing, and Windows Win32 APIs (user32.dll, kernel32.dll), they are strictly compatible with Windows operating systems.
+1. Save the code into a file named `VncClient.ps1`.
+2. Open PowerShell and execute the script: `.\VncClient.ps1`
+3. Enter your target host, port, and password, then click **Connect** or press `Enter`.
