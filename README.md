@@ -1,4 +1,4 @@
-# Interactive VNC Client GUI (PowerShell / WPF / C#)
+# Interactive VNC Client GUI
 
 A standalone, lightweight, high-performance VNC client written entirely in **PowerShell 5.1**, **WPF/XAML**, and **inlined C#**. Designed with the dark **Catppuccin Macchiato** aesthetic, it delivers low-latency remote desktop streaming without relying on external third-party dependencies or heavy installation packages.
 
@@ -51,17 +51,4 @@ This project was created to provide a **portable, zero-dependency, single-script
 
 ---
 
-## Requirements
 
-* **OS:** Windows 7 / 8.1 / 10 / 11 or Windows Server 2012+
-* **PowerShell:** Version 5.1 or higher
-* **Framework:** .NET Framework 4.5+ (Standard on modern Windows installations)
-* **Target Protocol:** RFB 003.008 compliant VNC Servers (e.g., UltraVNC, TightVNC, RealVNC, x11vnc)
-
----
-
-## Usage
-
-1. Save the code into a file named `VncClient.ps1`.
-2. Open PowerShell and execute the script: `.\VncClient.ps1`
-3. Enter your target host, port, and password, then click **Connect** or press `Enter`.
